@@ -1,0 +1,45 @@
+{
+  "project": "ResolveOps",
+  "version": "0.1.0",
+  "created_at": "2026-10-08",
+  "workflow": {
+    "require_discuss_before_plan": true,
+    "require_spec_before_plan": false,
+    "auto_commit": true,
+    "parallel_execution": true,
+    "require_verification": true,
+    "code_review_enabled": true
+  },
+  "model_profile": {
+    "primary": "claude-sonnet",
+    "fast": "claude-haiku"
+  },
+  "stack": {
+    "frontend": "nextjs",
+    "backend": "fastapi",
+    "database": "postgresql",
+    "cache": "redis",
+    "vector_db": "qdrant",
+    "llm": "groq",
+    "observability": "langfuse"
+  },
+  "milestones": [
+    {
+      "id": "m1",
+      "name": "Foundation & Skeleton",
+      "description": "Repo setup, Docker, mock systems, basic LangGraph, Groq integration, policy YAML, first 10 scenarios"
+    },
+    {
+      "id": "m2",
+      "name": "Governance & Reliability",
+      "description": "Gateway, identity verification, approval interrupt, idempotency, read-back, saga, fault injection, audit log, Langfuse, 30 scenarios, naive baseline"
+    },
+    {
+      "id": "m3",
+      "name": "Frontend & Polish",
+      "description": "Full Next.js frontend, red-team, ablations, crash-resume, CI gates, Docker polish, README, failure-modes, runbook, demo"
+    }
+  ],
+  "team_size": 1,
+  "timeline_weeks": 3
+}
