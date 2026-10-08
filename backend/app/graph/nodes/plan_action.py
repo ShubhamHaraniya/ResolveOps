@@ -45,14 +45,20 @@ def _format_billing_context(ctx: dict) -> str:
     return "\n".join(lines)
 
 
-def _format_rag_context(rag_results: list) -> str:
+def _format_rag_context(rag_results: list, conflicts: list = None) -> str:
     if not rag_results:
         return "No policy documents found for this request type."
     lines = []
+    if conflicts:
+        lines.append("⚠️ CRITICAL POLICY CONFLICT NOTICE:")
+        for c in conflicts:
+            lines.append(f"  • {c.get('resolution')}")
+        lines.append("  You MUST strictly adhere to the ACTIVE policy and reject superseded thresholds.")
+        lines.append("---")
     for r in rag_results:
-        status_note = " [DEPRECATED — DO NOT USE]" if r["status"] == "deprecated" else ""
-        lines.append(f"[{r['document_id']} v{r['version']} — {r['status']}{status_note}]")
-        lines.append(r["content"][:800])
+        status_note = " [DEPRECATED — DO NOT USE]" if r.get("status") == "deprecated" else " [ACTIVE POLICY — AUTHORITATIVE]"
+        lines.append(f"[{r.get('document_id')} v{r.get('version')} — {status_note}]")
+        lines.append(r.get("content", "")[:800])
         lines.append("---")
     return "\n".join(lines)
 
@@ -69,6 +75,7 @@ async def plan_action_node(state: TicketState) -> dict:
     context = state.get("context", {})
     identity = state.get("identity", {})
     rag_results = context.get("rag_results", [])
+    policy_conflicts = context.get("policy_conflicts", [])
 
     # Check injection flag — if suspected, restrict to note-only proposal
     flags = list(state.get("flags", []))
@@ -91,7 +98,7 @@ async def plan_action_node(state: TicketState) -> dict:
         identity_confidence=identity.get("confidence", 0.0),
         account_context=_format_account_context(context),
         billing_context=_format_billing_context(context),
-        rag_context=_format_rag_context(rag_results),
+        rag_context=_format_rag_context(rag_results, policy_conflicts),
         subject=ticket.get("subject", ""),
         body=body_text[:2000],
     )

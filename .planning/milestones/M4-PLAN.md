@@ -205,15 +205,15 @@ Before executing any task, confirm:
 
 ## M4 Definition of Done Checklist
 
-- [ ] All 18 policy documents created with YAML frontmatter in `rag/documents/`
-- [ ] `rag/ingestion/chunker.py` parses section hierarchy and preserves metadata
-- [ ] `rag/embeddings/embedder.py` runs FastEmbed `bge-m3` locally on CPU
-- [ ] `rag/ingestion/indexer.py` seeds dual-mode Qdrant (HTTP or embedded memory)
-- [ ] `rag/retrieval/bm25.py` extracts exact tokens and handles lexical queries
-- [ ] `rag/retrieval/hybrid.py` implements RRF candidate fusion
-- [ ] `rag/reranking/reranker.py` runs FlashRank and filters to top 3–5 chunks
-- [ ] Policy conflict detection flags `refund-policy-v2` vs `v3` and favors active version
-- [ ] `services/mcp_kb/server.py` implements `search_policy` tool with `readOnlyHint`
-- [ ] `backend/app/graph/nodes/gather_context.py` wired to hybrid RAG pipeline
-- [ ] All unit and integration tests passing (`pytest tests/rag/`)
-- [ ] Frontend knowledge base and ticket detail citations verified
+- [x] All 18 policy documents created with YAML frontmatter in `rag/documents/`
+- [x] `rag/ingestion/chunker.py` parses section hierarchy and preserves metadata
+- [x] `rag/embeddings/embedder.py` runs FastEmbed `bge-small-en-v1.5` locally on CPU
+- [x] `rag/ingestion/indexer.py` seeds dual-mode Qdrant (HTTP or embedded memory)
+- [x] `rag/retrieval/bm25.py` extracts exact tokens and handles lexical queries
+- [x] `rag/retrieval/hybrid.py` implements RRF candidate fusion
+- [x] `rag/reranking/reranker.py` runs FlashRank and filters to top 3–5 chunks
+- [x] Policy conflict detection flags `refund-policy-v2` vs `v3` and favors active version
+- [x] `services/mcp_kb/server.py` implements `search_policy` tool with `readOnlyHint`
+- [x] `backend/app/graph/nodes/gather_context.py` wired to hybrid RAG pipeline
+- [x] All unit and integration tests passing (`pytest tests/rag/`) — 31/31 passed
+- [x] Frontend knowledge base and ticket detail citations verified

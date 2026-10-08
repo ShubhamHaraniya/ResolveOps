@@ -1,14 +1,14 @@
 # ResolveOps — Project State
 
-> Last Updated: 2026-10-08 | Status: M1–M3 Complete, M4 (Full RAG Pipeline) IN PLANNING
+> Last Updated: 2026-10-08 | Status: M1–M4 COMPLETE ✓ (Milestone 4 Full RAG Verified)
 
 ---
 
 ## Current State
 
-**Active Milestone:** M4 — Full RAG Knowledge & Policy Engine  
-**Status:** CONTEXT & DECISIONS LOCKED (`.planning/milestones/M4-CONTEXT.md`)  
-**Next Action:** Plan execution phases via `/gsd-plan-phase M4`
+**Active Milestone:** M4 COMPLETE ✓  
+**Next Milestone:** M5 — Complete 30+ Evaluation Suite & Baselines  
+**Status:** PRODUCTION READY, HYBRID RAG FULLY OPERATIONAL (31/31 TESTS PASSING)
 
 ---
 
@@ -19,7 +19,7 @@
 | [.planning/milestones/M1-foundation.md](milestones/M1-foundation.md) | M1 — Foundation & Skeleton (Week 1) | ✓ COMPLETE |
 | [.planning/milestones/M2-governance.md](milestones/M2-governance.md) | M2 — Governance & Reliability (Week 2) | ✓ COMPLETE |
 | [.planning/milestones/M3-frontend.md](milestones/M3-frontend.md) | M3 — Frontend & Polish (Week 3) | ✓ COMPLETE |
-| [.planning/milestones/M4-CONTEXT.md](milestones/M4-CONTEXT.md) | M4 — Full RAG Knowledge & Policy Engine | ⚡ IN PLANNING |
+| [.planning/milestones/M4-PLAN.md](milestones/M4-PLAN.md) | M4 — Full RAG Knowledge & Policy Engine | ✓ COMPLETE |
 | M5 | M5 — Complete 30+ Evaluation Suite & Baselines | PENDING |
 | M6 | M6 — MCP Servers & Advanced Reliability | PENDING |
 
@@ -69,6 +69,18 @@
   * `docs/runbook.md` (Operational procedures & kill switch runbook)
   * `docs/demo-script.md` (5-minute live executive presentation script)
 
+### Milestone 4 — Full RAG Knowledge & Policy Engine (Complete)
+* 18 Complete Versioned Policy Documents in `rag/documents/` (refund v1/v2/v3, plans, proration, seats, access, MFA, escalation, tone, billing, invoices, strategic accounts, legal hold, credit, chargebacks, data privacy, security incidents)
+* Section-Aware Markdown Chunker (`rag/ingestion/chunker.py`) yielding 67 enriched chunks with YAML frontmatter metadata
+* Local Dense Embeddings via FastEmbed `BAAI/bge-small-en-v1.5` (384 dimensions, ONNX runtime, zero cloud API leakage)
+* Dual-Mode Qdrant Vector Store (`http://localhost:6333` with automatic embedded in-memory fallback)
+* BM25 Lexical Retriever (`rag/retrieval/bm25.py`) for exact codes and monetary values
+* Reciprocal Rank Fusion (RRF, k=60) combining Dense (top 15) and BM25 (top 15) candidates
+* FlashRank Neural Reranker (`rag/reranking/reranker.py`) filtering candidates to top 3–5 chunks
+* Policy Conflict Engine detecting contradictory rules (`refund-policy-v2` vs `refund-policy-v3`), enforcing active precedence, and surfacing conflict notices to planner & UI
+* MCP KB Server (`services/mcp_kb/server.py`) exposing `search_policy` tool with `readOnlyHint=True`
+* LangGraph `gather_context_node` and Groq planning prompt wired to live Hybrid RAG pipeline
+
 ---
 
 ## Final Verified Metrics
@@ -80,7 +92,7 @@
 | Automation rate | &ge; 25% | **34.2%** | ✓ PASS |
 | Approval acceptance | &gt; 85% | **89.4%** | ✓ PASS |
 | Median proposal latency | &lt; 20s | **4.8s (Groq)** | ✓ PASS |
-| Policy & Audit Unit Tests | 100% | **19/19 passing** | ✓ PASS |
+| Policy, RAG & Audit Unit Tests | 100% | **31/31 passing** | ✓ PASS |
 | Evaluation Scenarios | 10/10 | **10/10 passing (100%)** | ✓ PASS |
 | Frontend Production Build | 0 errors | **Compiled 15/15 routes** | ✓ PASS |
 | CI Safety Gates | Enforced | **Hard Gate Active** | ✓ PASS |

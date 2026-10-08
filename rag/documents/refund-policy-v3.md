@@ -35,25 +35,25 @@ Refunds will not be processed for invoices older than 30 days.
 
 ## 3. Approval Thresholds
 
-### 3.1 Tier 1 — Small Refunds (Support Agent Approval)
+### 3.1 Tier 1 — Small Refunds (Support Agent Approval — Rule REF-001)
 
-Refunds **up to $50** may be approved by a **support agent**.
+Refunds **up to $50** (Rule REF-001) may be approved by a **support agent**.
 
 Requirements:
 - Invoice must be within 30-day window
 - Account must not be on legal hold
 - Account must not be flagged as strategic
 
-### 3.2 Tier 2 — Medium Refunds (Support Lead Approval)
+### 3.2 Tier 2 — Medium Refunds (Support Lead Approval — Rule REF-002)
 
-Refunds **between $50 and $500** require **support lead approval**.
+Refunds **between $50 and $500** (Rule REF-002) require **support lead approval**.
 
 Requirements:
 - Account must not be on legal hold
 
-### 3.3 Tier 3 — Large Refunds (Finance Escalation Required)
+### 3.3 Tier 3 — Large Refunds (Finance Escalation Required — Rule REF-099)
 
-Refunds **exceeding $500** require **Finance Controller escalation**.
+Refunds **exceeding $500** (Rule REF-099) require **Finance Controller escalation**.
 
 These refunds **cannot be processed by the support team** and must be escalated to finance@northwindcloud.com.
 
