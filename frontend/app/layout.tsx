@@ -18,8 +18,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full antialiased">
-      <body className="h-full bg-slate-50 text-slate-900 flex overflow-hidden">
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+      <body className="h-full bg-slate-50 text-slate-900 flex overflow-hidden" suppressHydrationWarning>
         <AppProvider>
           {/* Fixed Dark Navy Sidebar */}
           <Suspense fallback={<aside className="w-64 bg-[#0b1329] h-screen" />}>

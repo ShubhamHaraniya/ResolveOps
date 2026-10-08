@@ -33,10 +33,10 @@ export function formatDate(dateString: string): string {
 export function timeAgo(dateString: string): string {
   try {
     const date = new Date(dateString);
-    const nowTime = typeof window !== "undefined" ? Date.now() : BASE_PRERENDER_TIME;
-    const seconds = Math.max(0, Math.floor((nowTime - date.getTime()) / 1000));
+    const diff = Math.floor((BASE_PRERENDER_TIME - date.getTime()) / 1000);
+    const seconds = Math.abs(diff);
 
-    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 60) return "just now";
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);

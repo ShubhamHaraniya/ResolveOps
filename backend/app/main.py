@@ -97,6 +97,18 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router, prefix="/api", tags=["Analytics"])
     app.include_router(demo_router, prefix="/api", tags=["Demo"])
 
+    @app.get("/")
+    async def root():
+        return {
+            "app": "ResolveOps",
+            "tagline": "Governed AI Support Operations Platform",
+            "status": "online",
+            "version": settings.version,
+            "docs": "/docs",
+            "health": "/health",
+            "ready": "/ready",
+        }
+
     return app
 
 
