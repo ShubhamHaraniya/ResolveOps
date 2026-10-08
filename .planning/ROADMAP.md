@@ -9,11 +9,15 @@
 
 | ID | Milestone | Timeline | Status | Phases |
 |---|---|---|---|---|
-| [M1](#milestone-1--foundation--skeleton) | Foundation & Skeleton | Week 1 | PENDING | 8 phases |
-| [M2](#milestone-2--governance--reliability) | Governance & Reliability | Week 2 | PENDING | 7 phases |
-| [M3](#milestone-3--frontend--polish) | Frontend & Polish | Week 3 | PENDING | 8 phases |
+| [M1](#milestone-1--foundation--skeleton) | Foundation & Skeleton | Week 1 | ✓ COMPLETE | 8 phases |
+| [M2](#milestone-2--governance--reliability) | Governance & Reliability | Week 2 | ✓ COMPLETE | 7 phases |
+| [M3](#milestone-3--frontend--polish) | Frontend & Polish | Week 3 | ✓ COMPLETE | 8 phases |
+| [M4](#milestone-4--full-rag-knowledge--policy-engine) | Full RAG Knowledge & Policy Engine | Next | IN PLANNING | 6 phases |
+| [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | PENDING | 5 phases |
+| [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | PENDING | 5 phases |
 
-**Plan each milestone:** `/gsd-plan-phase M1`, `/gsd-plan-phase M2`, `/gsd-plan-phase M3`
+**Active Milestone Plan:** `/gsd-plan-phase M4`
+
 
 ---
 
@@ -95,18 +99,67 @@
 | M3-P8 | CI/CD + Documentation | Safety gates, all 7 docs, README with 19 sections |
 
 ### M3 Definition of Done
-- [ ] All 9 pages work (dashboard, tickets, approvals, customers, kb, audit, analytics, traces, settings)
-- [ ] Demo mode: all 6 scenarios work end-to-end
-- [ ] CI hard-fails if unsafe_action_rate > 0 or duplicate_side_effect_rate > 0
-- [ ] All 7 docs complete
-- [ ] README with all 19 sections
-- [ ] 5-minute demo works
+- [x] All 9 pages work (dashboard, tickets, approvals, customers, kb, audit, analytics, traces, settings)
+- [x] Demo mode: all 6 scenarios work end-to-end
+- [x] CI hard-fails if unsafe_action_rate > 0 or duplicate_side_effect_rate > 0
+- [x] All 7 docs complete
+- [x] README with all 19 sections
+- [x] 5-minute demo works
+
+---
+
+## Milestone 4 — Full RAG Knowledge & Policy Engine
+
+**Goal:** Production-grade Hybrid RAG pipeline with 18 versioned policy documents, section-aware chunking, FastEmbed bge-m3 dense retrieval, BM25 lexical retrieval, RRF fusion, FlashRank reranking, and contradictory policy conflict handling.
+
+**Plan file:** `.planning/milestones/M4-CONTEXT.md`
+
+### Phases
+
+| Phase | Name | Key Output |
+|---|---|---|
+| M4-P1 | Policy Corpus Expansion | 18 markdown documents with YAML frontmatter in `rag/documents/` |
+| M4-P2 | Section-Aware Chunker | Clean markdown parser preserving title, section, version, dates, status |
+| M4-P3 | Local FastEmbed Embeddings | `BAAI/bge-m3` ONNX embedder with CPU support & zero-PyTorch footprint |
+| M4-P4 | Dual-Mode Qdrant Vector Store | HTTP + embedded fallback (`:memory:`) collection management |
+| M4-P5 | BM25 + RRF Hybrid Fusion | Lexical exact token match + Reciprocal Rank Fusion |
+| M4-P6 | FlashRank Reranker & Graph Wiring | Neural reranking to top 3-5, policy conflict detector, LangGraph wiring |
+
+---
+
+## Milestone 5 — Complete 30+ Evaluation Suite & Baselines
+
+**Goal:** 30+ evaluation scenarios across 5 categories, Naive Baseline agent, and ablation testing matrix.
+
+### Phases
+
+| Phase | Name | Key Output |
+|---|---|---|
+| M5-P1 | Scenario Suite Expansion | 30 YAML scenarios (6 Auto, 8 Approval, 5 Forbidden, 7 Adversarial, 4 Reliability) |
+| M5-P2 | Naive Baseline Agent | Prompt-only safety agent bypassing Gateway to prove necessity |
+| M5-P3 | Ablation Runner | 4 ablations (no-provenance, no-identity, no-approval-hash, no-idempotency) |
+| M5-P4 | Automated Reporting | Markdown report tables in `evals/reports/` with 5-run variance |
+
+---
+
+## Milestone 6 — MCP Servers & Advanced Reliability
+
+**Goal:** Standardized FastMCP tool servers with annotations and production reliability patterns.
+
+### Phases
+
+| Phase | Name | Key Output |
+|---|---|---|
+| M6-P1 | MCP Protocol Servers | 5 FastMCP servers with read/write hints |
+| M6-P2 | Transactional Outbox | PostgreSQL outbox pattern for reliable side-effects |
+| M6-P3 | Commit Timeout Read-Back | Automatic state reconciliation on unknown-outcome writes |
+| M6-P4 | Circuit Breakers & Saga | Degraded mode failover and multi-step compensation |
 
 ---
 
 ## Global Definition of Done
 
-See each milestone's DoD above. Project is complete only when all three milestone DoDs are checked.
+See each milestone's DoD above. Project is complete only when all milestone DoDs are checked.
 
 Key non-negotiables (must NOT be cut):
 - Policy Gateway
@@ -117,3 +170,4 @@ Key non-negotiables (must NOT be cut):
 - Red-Team Tests
 - Audit Trail
 - Failure Modes Documentation
+

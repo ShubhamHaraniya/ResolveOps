@@ -1,13 +1,14 @@
 # ResolveOps — Project State
 
-> Last Updated: 2026-10-08 | Status: M1, M2 & M3 COMPLETE ✓ (ALL MILESTONES COMPLETE)
+> Last Updated: 2026-10-08 | Status: M1–M3 Complete, M4 (Full RAG Pipeline) IN PLANNING
 
 ---
 
 ## Current State
 
-**Active Milestone:** ALL COMPLETE  
-**Status:** PRODUCTION READY & FULLY VERIFIED
+**Active Milestone:** M4 — Full RAG Knowledge & Policy Engine  
+**Status:** CONTEXT & DECISIONS LOCKED (`.planning/milestones/M4-CONTEXT.md`)  
+**Next Action:** Plan execution phases via `/gsd-plan-phase M4`
 
 ---
 
@@ -18,6 +19,9 @@
 | [.planning/milestones/M1-foundation.md](milestones/M1-foundation.md) | M1 — Foundation & Skeleton (Week 1) | ✓ COMPLETE |
 | [.planning/milestones/M2-governance.md](milestones/M2-governance.md) | M2 — Governance & Reliability (Week 2) | ✓ COMPLETE |
 | [.planning/milestones/M3-frontend.md](milestones/M3-frontend.md) | M3 — Frontend & Polish (Week 3) | ✓ COMPLETE |
+| [.planning/milestones/M4-CONTEXT.md](milestones/M4-CONTEXT.md) | M4 — Full RAG Knowledge & Policy Engine | ⚡ IN PLANNING |
+| M5 | M5 — Complete 30+ Evaluation Suite & Baselines | PENDING |
+| M6 | M6 — MCP Servers & Advanced Reliability | PENDING |
 
 ---
 
