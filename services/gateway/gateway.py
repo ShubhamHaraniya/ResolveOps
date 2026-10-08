@@ -22,8 +22,21 @@ import structlog
 from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 
+import sys
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+BACKEND_DIR = REPO_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from tokens import make_args_hash, ScopedJWT
 from injection import scan_all_context, InjectionResult
+from services import mcp_registry
+from app.reliability.circuit_breaker import get_circuit_breaker, CircuitOpenError
+from app.reliability.readback import ReadBackVerifier, ReadBackState
+from app.reliability.outbox import record_intent_sync
 
 log = structlog.get_logger()
 
@@ -340,104 +353,62 @@ def step10_check_kill_switch(req: GatewayRequest) -> None:
 
 
 async def step11_execute(req: GatewayRequest) -> Any:
-    """Step 11: Dispatch to the appropriate mock backend."""
+    """
+    Step 11: Dispatch to standardized MCP tool server or backend.
+    Enforces per-service circuit breaker and commit-timeout read-back verification.
+    """
     tool = req.tool
-    args = req.args
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            if tool == "billing.issue_refund":
-                r = await client.post(f"{BILLING_URL}/refunds", json={
-                    "invoice_id": args["invoice_id"],
-                    "amount_cents": args["amount_cents"],
-                    "reason": args["reason"],
-                    "idempotency_key": args.get("idempotency_key", make_args_hash(tool, args)),
-                }, headers={"Idempotency-Key": args.get("idempotency_key", "")})
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "billing.issue_credit":
-                r = await client.post(f"{BILLING_URL}/credits", json=args)
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "billing.change_plan":
-                sub_id = args.pop("subscription_id")
-                r = await client.post(f"{BILLING_URL}/subscriptions/{sub_id}/change-plan", json=args)
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "billing.get_invoice":
-                r = await client.get(f"{BILLING_URL}/invoices/{args['invoice_id']}")
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "billing.list_invoices":
-                r = await client.get(f"{BILLING_URL}/customers/{args['account_id']}/invoices")
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "billing.get_subscription":
-                r = await client.get(f"{BILLING_URL}/subscriptions/{args['subscription_id']}")
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "crm.get_account":
-                r = await client.get(f"{CRM_URL}/accounts/{args['account_id']}")
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "crm.find_contact":
-                r = await client.get(f"{CRM_URL}/contacts", params={"email": args["email"]})
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "access.grant_access":
-                r = await client.post(f"{IAM_URL}/access-grants", json=args)
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "access.reset_mfa":
-                r = await client.post(f"{IAM_URL}/mfa-reset", json=args)
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "access.get_user":
-                r = await client.get(f"{IAM_URL}/users/{args['email']}")
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "ticketing.add_internal_note":
-                r = await client.post(f"{TICKETING_URL}/tickets/{args['ticket_id']}/comments", json={
-                    "body": args["body"],
-                    "is_internal": True,
-                    "author": "agent@resolveops",
-                })
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "ticketing.send_public_reply":
-                r = await client.post(f"{TICKETING_URL}/tickets/{args['ticket_id']}/comments", json={
-                    "body": args["body"],
-                    "is_internal": False,
-                    "author": "support@northwindcloud.com",
-                })
-                r.raise_for_status()
-                return r.json()
-            
-            elif tool == "ticketing.patch_ticket":
-                ticket_id = args.pop("ticket_id")
-                r = await client.patch(f"{TICKETING_URL}/tickets/{ticket_id}", json=args)
-                r.raise_for_status()
-                return r.json()
-            
-            else:
-                raise HTTPException(status_code=403, detail=f"Unknown tool: {tool}")
-        
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code >= 500:
-                raise HTTPException(status_code=502, detail=f"Backend error: {e.response.text[:200]}")
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text[:200])
+    args = dict(req.args)
+    service = tool.split(".")[0] if "." in tool else tool
+    breaker = get_circuit_breaker(service)
+
+    # 1. Circuit breaker guard
+    try:
+        breaker.can_execute()
+    except CircuitOpenError as e:
+        log.error("gateway.circuit_open_blocked", tool=tool, service=service)
+        raise HTTPException(status_code=503, detail=str(e))
+
+    # 2. Dispatch via standardized MCP registry
+    try:
+        idemp_key = args.get("idempotency_key") or make_args_hash(tool, args)
+        headers = {"Idempotency-Key": idemp_key}
+        result = await mcp_registry.dispatch_tool(tool, args, headers=headers)
+        breaker.record_success()
+
+        # If write tool, record outbox intent
+        meta = mcp_registry.get_tool_metadata(tool)
+        if meta and not meta.get("annotations", {}).get("readOnlyHint", True):
+            record_intent_sync(event_type=tool, payload={"ticket_id": req.ticket_id, "args": args, "result": result})
+
+        return result
+
+    except httpx.TimeoutException:
+        breaker.record_failure()
+        log.warn("gateway.dispatch_timeout", tool=tool)
+        # Attempt read-back verification
+        idemp_key = args.get("idempotency_key")
+        readback_res = await ReadBackVerifier.reconcile_timeout(tool, args, idemp_key)
+        if readback_res.get("state") == ReadBackState.COMMITTED:
+            breaker.record_success()
+            return readback_res.get("result", {"status": "reconciled_committed"})
+        elif readback_res.get("state") == ReadBackState.INDETERMINATE:
+            raise HTTPException(
+                status_code=502,
+                detail=f"TIMEOUT RECONCILIATION INDETERMINATE: Mutation '{tool}' timed out and state cannot be confirmed. Manual reconciliation required."
+            )
+        else:
+            raise HTTPException(status_code=504, detail=f"Backend timeout executing '{tool}'")
+
+    except ValueError as e:
+        # Schema / domain constraint violation (e.g. forbidden admin role)
+        breaker.record_success()
+        raise HTTPException(status_code=403, detail=str(e))
+
+    except Exception as e:
+        breaker.record_failure()
+        log.error("gateway.dispatch_error", tool=tool, error=str(e))
+        raise HTTPException(status_code=502, detail=f"Backend execution failure: {str(e)}")
 
 
 def step12_audit_result(

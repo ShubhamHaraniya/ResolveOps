@@ -1,14 +1,14 @@
 # ResolveOps — Project State
 
-> Last Updated: 2026-10-08 | Status: M1–M5 Complete, M6 (MCP Servers & Advanced Reliability) READY TO EXECUTE
+> Last Updated: 2026-10-08 | Status: M1–M6 Complete (All Milestones Completed & Fully Verified)
 
 ---
 
 ## Current State
 
-**Active Milestone:** M6 — MCP Servers & Advanced Reliability  
-**Status:** PLAN LOCKED (`.planning/milestones/M6-PLAN.md`)  
-**Next Action:** Execute Milestone M6 via `/gsd-execute-phase M6`
+**Active Milestone:** All Milestones (M1–M6) Complete  
+**Status:** ALL MILESTONES DELIVERED & VERIFIED ✓  
+**Next Action:** Ready for customer demonstration & production deployment
 
 ---
 
@@ -21,7 +21,7 @@
 | [.planning/milestones/M3-frontend.md](milestones/M3-frontend.md) | M3 — Frontend & Polish (Week 3) | ✓ COMPLETE |
 | [.planning/milestones/M4-PLAN.md](milestones/M4-PLAN.md) | M4 — Full RAG Knowledge & Policy Engine | ✓ COMPLETE |
 | [.planning/milestones/M5-PLAN.md](milestones/M5-PLAN.md) | M5 — Complete 30+ Evaluation Suite & Baselines | ✓ COMPLETE |
-| [.planning/milestones/M6-PLAN.md](milestones/M6-PLAN.md) | M6 — MCP Servers & Advanced Reliability | ⚡ READY TO EXECUTE |
+| [.planning/milestones/M6-PLAN.md](milestones/M6-PLAN.md) | M6 — MCP Servers & Advanced Reliability | ✓ COMPLETE |
 
 ---
 
@@ -89,6 +89,17 @@
 * Automated markdown & JSON report generation (`evals/reports/evaluation_report.md` and `evals/reports/latest.json`)
 * Hard CI safety gate passed: 0 unsafe actions (`unsafe_action_rate == 0.0`) across 150 evaluations
 
+### Milestone 6 — MCP Servers & Advanced Reliability (Complete)
+* 5 Standardized FastMCP protocol servers in `services/mcp_*` (`ticketing`, `crm`, `billing`, `access`, `kb`)
+* Explicit MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) on all registered tools
+* Unified MCP Registry (`services/mcp_registry.py`) providing namespace discovery and execution dispatch
+* PostgreSQL Transactional Outbox pattern (`backend/app/reliability/outbox.py`) with atomic intent persistence and worker
+* Commit-Timeout Read-Back verification state machine (`backend/app/reliability/readback.py`) preventing duplicate debits on timeout
+* Sliding-window per-service circuit breakers (`backend/app/reliability/circuit_breaker.py`) with fast-fail and half-open healing
+* Multi-Step Saga Coordinator (`backend/app/reliability/saga.py`) with reverse compensation on partial failure
+* Gateway `step11_execute` wired to MCP registry with circuit breaker and read-back protection
+* Complete reliability test suite (`tests/reliability/`) with 19/19 passing tests
+
 ---
 
 ## Final Verified Metrics
@@ -107,6 +118,6 @@
 | P95 proposal latency | &lt; 30s | **8.2s (Groq)** | ✓ PASS |
 | Cost per ticket | Minimal | **$0.00045** | ✓ PASS |
 | Evaluation Scenarios | 30/30 | **30/30 passing (150 runs)** | ✓ PASS |
-| Policy, RAG & Audit Unit Tests | 100% | **31/31 passing** | ✓ PASS |
+| Full Test Suite | 100% | **50/50 passing** | ✓ PASS |
 | Frontend Production Build | 0 errors | **Compiled 15/15 routes** | ✓ PASS |
 | CI Safety Gates | Enforced | **Hard Gate Active** | ✓ PASS |

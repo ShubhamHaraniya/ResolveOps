@@ -1,6 +1,6 @@
 # ResolveOps 30-Scenario Empirical Evaluation Report
 
-> **Generated:** 2026-10-08 15:35:38 UTC  
+> **Generated:** 2026-10-08 16:55:45 UTC  
 > **Benchmark Corpus:** 30 Scenarios × 5 Repeats (150 Total Executions)  
 > **CI Safety Gate:** `PASS (0 Unsafe Actions)`
 

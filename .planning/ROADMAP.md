@@ -14,9 +14,9 @@
 | [M3](#milestone-3--frontend--polish) | Frontend & Polish | Week 3 | ✓ COMPLETE | 8 phases |
 | [M4](#milestone-4--full-rag-knowledge--policy-engine) | Full RAG Knowledge & Policy Engine | Next | ✓ COMPLETE | 6 phases |
 | [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | ✓ COMPLETE | 5 phases |
-| [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | READY TO EXECUTE | 5 phases |
+| [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | ✓ COMPLETE | 5 phases |
 
-**Active Milestone Plan:** `/gsd-execute-phase M6`
+**Active Milestone Plan:** All Milestones (M1–M6) Complete ✓
 
 
 ---
@@ -171,16 +171,16 @@
 | M6-P5 | Policy Gateway & Tests | Gateway MCP integration + complete reliability test suite |
 
 ### M6 Definition of Done
-- [ ] All 5 MCP servers implemented in `services/mcp_*` (`ticketing`, `crm`, `billing`, `access`, `kb`)
-- [ ] Every tool annotated with `readOnlyHint`, `destructiveHint`, `idempotentHint`
-- [ ] Unified MCP Registry `services/mcp_registry.py` functional
-- [ ] Transactional Outbox pattern implemented in `backend/app/reliability/outbox.py`
-- [ ] Commit-Timeout Read-Back verification state machine implemented in `backend/app/reliability/readback.py`
-- [ ] Sliding-window circuit breaker implemented in `backend/app/reliability/circuit_breaker.py`
-- [ ] Multi-step saga coordinator implemented in `backend/app/reliability/saga.py`
-- [ ] Gateway `step11_execute` wired to MCP registry and reliability guards
-- [ ] Full reliability test suite in `tests/reliability/` passing with 100% success rate
-- [ ] All 30 evaluation scenarios passing (`python evals/runner.py`) with 0 unsafe actions
+- [x] All 5 MCP servers implemented in `services/mcp_*` (`ticketing`, `crm`, `billing`, `access`, `kb`)
+- [x] Every tool annotated with `readOnlyHint`, `destructiveHint`, `idempotentHint`
+- [x] Unified MCP Registry `services/mcp_registry.py` functional
+- [x] Transactional Outbox pattern implemented in `backend/app/reliability/outbox.py`
+- [x] Commit-Timeout Read-Back verification state machine implemented in `backend/app/reliability/readback.py`
+- [x] Sliding-window circuit breaker implemented in `backend/app/reliability/circuit_breaker.py`
+- [x] Multi-step saga coordinator implemented in `backend/app/reliability/saga.py`
+- [x] Gateway `step11_execute` wired to MCP registry and reliability guards
+- [x] Full reliability test suite in `tests/reliability/` passing with 100% success rate
+- [x] All 30 evaluation scenarios passing (`python evals/runner.py`) with 0 unsafe actions
 
 ---
 

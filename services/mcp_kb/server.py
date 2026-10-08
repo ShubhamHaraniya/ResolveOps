@@ -48,7 +48,7 @@ def list_tools() -> list[dict]:
     return [SEARCH_POLICY_TOOL]
 
 
-async def call_tool(name: str, arguments: dict) -> Dict[str, Any]:
+async def call_tool(name: str, arguments: dict, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Execute an MCP tool call."""
     if name != "search_policy":
         raise ValueError(f"Unknown MCP tool '{name}' on mcp_kb server")
