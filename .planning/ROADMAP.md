@@ -14,9 +14,9 @@
 | [M3](#milestone-3--frontend--polish) | Frontend & Polish | Week 3 | ✓ COMPLETE | 8 phases |
 | [M4](#milestone-4--full-rag-knowledge--policy-engine) | Full RAG Knowledge & Policy Engine | Next | ✓ COMPLETE | 6 phases |
 | [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | ✓ COMPLETE | 5 phases |
-| [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | PENDING | 5 phases |
+| [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | READY TO EXECUTE | 5 phases |
 
-**Active Milestone Plan:** `/gsd-plan-phase M6`
+**Active Milestone Plan:** `/gsd-execute-phase M6`
 
 
 ---
@@ -158,14 +158,29 @@
 
 **Goal:** Standardized FastMCP tool servers with annotations and production reliability patterns.
 
+**Plan file:** `.planning/milestones/M6-PLAN.md`
+
 ### Phases
 
 | Phase | Name | Key Output |
 |---|---|---|
-| M6-P1 | MCP Protocol Servers | 5 FastMCP servers with read/write hints |
+| M6-P1 | MCP Protocol Servers | 5 FastMCP servers in `services/mcp_*` with read/write hints |
 | M6-P2 | Transactional Outbox | PostgreSQL outbox pattern for reliable side-effects |
 | M6-P3 | Commit Timeout Read-Back | Automatic state reconciliation on unknown-outcome writes |
 | M6-P4 | Circuit Breakers & Saga | Degraded mode failover and multi-step compensation |
+| M6-P5 | Policy Gateway & Tests | Gateway MCP integration + complete reliability test suite |
+
+### M6 Definition of Done
+- [ ] All 5 MCP servers implemented in `services/mcp_*` (`ticketing`, `crm`, `billing`, `access`, `kb`)
+- [ ] Every tool annotated with `readOnlyHint`, `destructiveHint`, `idempotentHint`
+- [ ] Unified MCP Registry `services/mcp_registry.py` functional
+- [ ] Transactional Outbox pattern implemented in `backend/app/reliability/outbox.py`
+- [ ] Commit-Timeout Read-Back verification state machine implemented in `backend/app/reliability/readback.py`
+- [ ] Sliding-window circuit breaker implemented in `backend/app/reliability/circuit_breaker.py`
+- [ ] Multi-step saga coordinator implemented in `backend/app/reliability/saga.py`
+- [ ] Gateway `step11_execute` wired to MCP registry and reliability guards
+- [ ] Full reliability test suite in `tests/reliability/` passing with 100% success rate
+- [ ] All 30 evaluation scenarios passing (`python evals/runner.py`) with 0 unsafe actions
 
 ---
 

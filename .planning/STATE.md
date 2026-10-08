@@ -1,14 +1,14 @@
 # ResolveOps — Project State
 
-> Last Updated: 2026-10-08 | Status: M1–M5 Complete, M6 (MCP Servers & Advanced Reliability) PENDING
+> Last Updated: 2026-10-08 | Status: M1–M5 Complete, M6 (MCP Servers & Advanced Reliability) READY TO EXECUTE
 
 ---
 
 ## Current State
 
 **Active Milestone:** M6 — MCP Servers & Advanced Reliability  
-**Status:** READY TO PLAN (`.planning/milestones/M6-PLAN.md`)  
-**Next Action:** Plan Milestone M6 via `/gsd-plan-phase M6`
+**Status:** PLAN LOCKED (`.planning/milestones/M6-PLAN.md`)  
+**Next Action:** Execute Milestone M6 via `/gsd-execute-phase M6`
 
 ---
 
@@ -21,7 +21,7 @@
 | [.planning/milestones/M3-frontend.md](milestones/M3-frontend.md) | M3 — Frontend & Polish (Week 3) | ✓ COMPLETE |
 | [.planning/milestones/M4-PLAN.md](milestones/M4-PLAN.md) | M4 — Full RAG Knowledge & Policy Engine | ✓ COMPLETE |
 | [.planning/milestones/M5-PLAN.md](milestones/M5-PLAN.md) | M5 — Complete 30+ Evaluation Suite & Baselines | ✓ COMPLETE |
-| M6 | M6 — MCP Servers & Advanced Reliability | PENDING |
+| [.planning/milestones/M6-PLAN.md](milestones/M6-PLAN.md) | M6 — MCP Servers & Advanced Reliability | ⚡ READY TO EXECUTE |
 
 ---
 
