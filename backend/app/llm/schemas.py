@@ -1,107 +1,99 @@
 """
-LLM Output Schemas — All Pydantic models for structured Groq responses.
-All workflow-critical decisions use these schemas (never free-form text).
+LLM output schemas — Pydantic models for Groq structured outputs.
+All models use strict JSON mode (no loose fields).
 """
-from typing import Any, Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
 class Classification(BaseModel):
-    """Output of classify_ticket() using GROQ_MODEL_FAST."""
+    """Ticket classification result."""
     category: Literal[
-        "refund", "credit", "plan_change", "seat_change",
-        "access_request", "mfa_reset", "invoice_question",
-        "billing_contact", "other"
+        "refund_request",
+        "billing_inquiry",
+        "access_request",
+        "plan_change",
+        "technical_support",
+        "account_information",
+        "general_inquiry",
+        "complaint",
+        "other",
     ]
-    urgency: Literal["low", "medium", "high", "critical"]
+    urgency: Literal["critical", "high", "medium", "low"]
     sentiment: Literal["positive", "neutral", "frustrated", "angry"]
-    confidence: float = Field(ge=0.0, le=1.0)
-    human_review_required: bool  # True if confidence < 0.7
-    brief_reason: str = Field(max_length=200)
+    confidence: float = Field(ge=0.0, le=1.0, description="0-1 classification confidence")
+    human_review_required: bool = Field(
+        default=False,
+        description="True if ticket is ambiguous, sensitive, or has injection signals"
+    )
+    brief_reason: str = Field(max_length=200, description="One-line reason for classification")
+
+
+class RAGCitation(BaseModel):
+    """Citation from a policy document."""
+    document_id: str
+    version: int
+    section: str
+    excerpt: str = Field(max_length=500)
+    relevance_score: float = Field(ge=0.0, le=1.0)
+
+
+class ProposedAction(BaseModel):
+    """A single proposed tool call."""
+    tool: str = Field(description="Tool name from approved registry, e.g. billing.issue_refund")
+    arguments: dict = Field(description="Tool arguments as a flat dict with snake_case keys")
+    reason: str = Field(max_length=200, description="Brief reason for proposing this action")
+    risk_level: Literal["low", "medium", "high", "critical"] = Field(default="low")
+
+
+class ProposedResolution(BaseModel):
+    """Complete proposed resolution for a ticket."""
+    actions: list[ProposedAction] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Ordered list of proposed tool calls (max 5)"
+    )
+    rag_citations: list[RAGCitation] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Policy citations supporting this proposal"
+    )
+    draft_reply: str = Field(
+        default="",
+        max_length=1000,
+        description="Draft customer reply (will be reviewed before sending)"
+    )
+    risk_flags: list[str] = Field(
+        default_factory=list,
+        description="Risk signals: injection_suspected, legal_hold, strategic_account, etc."
+    )
+    reasoning_summary: str = Field(
+        max_length=500,
+        description="Internal explanation of why these actions were chosen"
+    )
+    clarification_needed: bool = Field(
+        default=False,
+        description="True if more information is needed before acting"
+    )
+    clarification_question: Optional[str] = Field(
+        default=None,
+        max_length=300,
+        description="If clarification_needed, what question to ask the customer"
+    )
 
 
 class IdentityResult(BaseModel):
-    """Result of deterministic identity verification (NOT LLM-generated)."""
+    """Result of identity verification (deterministic — not LLM)."""
     verified: bool
-    method: str
+    method: Literal[
+        "crm_authorized_contact",
+        "crm_lookup",
+        "crm_error",
+        "crm_unavailable",
+        "none",
+    ]
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
     authorized_contact_match: bool
     requester_email: str
-    account_id: str | None = None
-
-
-class RAGCitation(BaseModel):
-    """A single retrieved policy chunk with full provenance."""
-    chunk_id: str
-    document_id: str
-    version: int
-    section: str
-    content: str
-    relevance_score: float = Field(ge=0.0, le=1.0)
-    status: Literal["active", "deprecated"]
-    effective_date: str | None = None
-
-
-class ProposedAction(BaseModel):
-    """A single typed action proposed by the planning LLM."""
-    tool: str = Field(description="Exact tool name: e.g. billing.issue_refund")
-    arguments: dict[str, Any] = Field(
-        description="Typed arguments. All IDs must come from trusted context, not invented."
-    )
-    reason: str = Field(max_length=500)
-    risk_level: Literal["low", "medium", "high"]
-
-
-class PolicyDecisionLLM(BaseModel):
-    """Policy decision as part of proposal (informational — actual decision from engine)."""
-    tier: Literal["auto", "approval", "forbidden"]
-    rule_id: str
-    reason: str
-
-
-class ProposedResolution(BaseModel):
-    """
-    Full structured proposal from plan_action() using GROQ_MODEL_PRIMARY.
-    This is a PROPOSAL only — gateway makes final authorization decision.
-    """
-    actions: list[ProposedAction] = Field(
-        max_length=5,
-        description="Proposed actions. Max 5. Must not include forbidden operations."
-    )
-    rag_citations: list[RAGCitation] = Field(
-        default_factory=list,
-        description="Policy chunks used to inform the proposal."
-    )
-    draft_reply: str = Field(
-        max_length=2000,
-        description="Draft customer reply. Uses only verified facts. No invented promises."
-    )
-    risk_flags: list[str] = Field(
-        default_factory=list,
-        description="e.g. ['injection_suspected', 'identity_mismatch', 'strategic_account']"
-    )
-    reasoning_summary: str = Field(
-        max_length=500,
-        description="Brief operational reasoning. NOT full chain-of-thought."
-    )
-    clarification_needed: bool = False
-    clarification_question: str | None = None
-
-
-class TokenUsage(BaseModel):
-    """Token usage tracking for cost estimation."""
-    model: str
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-    estimated_cost_usd: float | None = None
-
-
-class LLMCallResult(BaseModel):
-    """Wrapper for any LLM call result with usage tracking."""
-    result: Any
-    usage: TokenUsage
-    latency_ms: float
-    model: str
-    call_id: str
+    account_id: Optional[str] = None
