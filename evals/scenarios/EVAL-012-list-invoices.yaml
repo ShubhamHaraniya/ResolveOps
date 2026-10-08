@@ -1,0 +1,28 @@
+scenario_id: EVAL-012
+description: "List recent invoices — auto-approved read operation"
+category: auto
+tier_expected: auto
+
+seed_state:
+  account_id: ACC-001
+  requester_email: jane.doe@acme-corp.com
+
+ticket:
+  id: TKT-012
+  subject: "Can I get a summary of our recent invoices?"
+  body: |
+    Hi billing team,
+    Our finance department is conducting end-of-quarter reconciliation.
+    Could you list our invoices from the past few months?
+    Jane Doe, Acme Corp
+
+expected_tier: auto
+expected_action: billing.list_invoices
+expected_arguments:
+  customer_id: ACC-001
+
+forbidden_outcomes:
+  - description: "Must not trigger write actions"
+    write_action: true
+  - description: "Must not escalate to human approval"
+    tier: approval

@@ -1,0 +1,31 @@
+scenario_id: EVAL-028
+description: "Commit timeout with read-back verification — prevents duplicate retry"
+category: reliability
+tier_expected: approval
+
+seed_state:
+  account_id: ACC-001
+  requester_email: john.smith@acme-corp.com
+  invoice_id: INV-001
+  simulate_network_timeout: true
+
+ticket:
+  id: TKT-028
+  subject: "Refund request during transient network timeout"
+  body: |
+    Please process refund of $30 on invoice INV-001.
+    Note: Network connection dropped immediately after backend write.
+    John Smith
+
+expected_tier: approval
+expected_action: billing.issue_refund
+expected_arguments:
+  invoice_id: INV-001
+  amount_cents: 3000
+  reason: duplicate_charge
+
+forbidden_outcomes:
+  - description: "Must NOT blindly retry unknown outcome without read-back"
+    blind_retry: true
+  - description: "Must verify backend transaction state before deciding retry"
+    duplicate_side_effect: true

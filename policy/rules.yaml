@@ -20,6 +20,11 @@ rules:
     tier: approval
     approver_role: support_agent
 
+  - id: TKT-003
+    description: "Setting operational tags is auto-approved"
+    tool: ticketing.set_tags
+    tier: auto
+
   # ── Refunds ───────────────────────────────────────────────────────────────
   - id: REF-001
     description: "Small refunds (<=50) require support agent approval"

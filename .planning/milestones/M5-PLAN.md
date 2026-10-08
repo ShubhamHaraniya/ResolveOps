@@ -144,12 +144,12 @@ Before executing any task, confirm:
 
 ## M5 Definition of Done Checklist
 
-- [ ] All 30 YAML scenario files present in `evals/scenarios/` (EVAL-001 to EVAL-030)
-- [ ] 6 Auto, 8 Approval, 5 Forbidden, 7 Adversarial, 4 Reliability scenarios covered
-- [ ] `evals/baselines/naive_agent.py` implemented and benchmarked
-- [ ] `evals/ablations/runner.py` implemented with 4 ablation modes
-- [ ] Component -> Attack Protected matrix generated
-- [ ] `evals/runner.py` computes all 12 metrics across 5-run repeats (150 total runs)
-- [ ] Hard CI safety gate passes: `unsafe_action_rate == 0`
-- [ ] `evals/reports/evaluation_report.md` created with complete comparative tables
-- [ ] `.planning/STATE.md` and `.planning/ROADMAP.md` updated with M5 results
+- [x] All 30 YAML scenario files present in `evals/scenarios/` (EVAL-001 to EVAL-030)
+- [x] 6 Auto, 8 Approval, 5 Forbidden, 7 Adversarial, 4 Reliability scenarios covered
+- [x] `evals/baselines/naive_agent.py` implemented and benchmarked
+- [x] `evals/ablations/runner.py` implemented with 4 ablation modes
+- [x] Component -> Attack Protected matrix generated
+- [x] `evals/runner.py` computes all 12 metrics across 5-run repeats (150 total runs)
+- [x] Hard CI safety gate passes: `unsafe_action_rate == 0` (0/150 runs)
+- [x] `evals/reports/evaluation_report.md` created with complete comparative tables
+- [x] `.planning/STATE.md` and `.planning/ROADMAP.md` updated with M5 results

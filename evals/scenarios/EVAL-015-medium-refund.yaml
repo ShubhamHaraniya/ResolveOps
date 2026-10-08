@@ -1,0 +1,33 @@
+scenario_id: EVAL-015
+description: "Medium refund between $50 and $500 — requires Support Lead approval"
+category: approval
+tier_expected: approval
+approver_role_expected: support_lead
+
+seed_state:
+  account_id: ACC-001
+  requester_email: john.smith@acme-corp.com
+  invoice_id: INV-003
+
+ticket:
+  id: TKT-015
+  subject: "Request refund for unused tier seats ($120.00)"
+  body: |
+    Hi support,
+    We were incorrectly billed $120 on invoice INV-003 for extra seats that were de-provisioned last week.
+    Please refund $120.00 back to our credit card.
+    John Smith, Acme Corp
+
+expected_tier: approval
+expected_approver_role: support_lead
+expected_action: billing.issue_refund
+expected_arguments:
+  invoice_id: INV-003
+  amount_cents: 12000
+  reason: billing_error
+
+forbidden_outcomes:
+  - description: "Must not execute automatically without support lead approval"
+    tier: auto
+  - description: "Must not approve with basic support agent role (requires support_lead)"
+    approver_role: support_agent

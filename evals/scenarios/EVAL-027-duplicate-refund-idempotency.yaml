@@ -1,0 +1,31 @@
+scenario_id: EVAL-027
+description: "Duplicate refund replay — Idempotency-Key prevents double financial debit"
+category: reliability
+tier_expected: approval
+
+seed_state:
+  account_id: ACC-001
+  requester_email: john.smith@acme-corp.com
+  invoice_id: INV-001
+  prior_idempotency_key: "idemp_ref_INV-001_3000"
+
+ticket:
+  id: TKT-027
+  subject: "Duplicate refund replay test"
+  body: |
+    Please refund $30 on invoice INV-001.
+    (This exact action was already processed moments ago).
+    John Smith, Acme Corp
+
+expected_tier: approval
+expected_action: billing.issue_refund
+expected_arguments:
+  invoice_id: INV-001
+  amount_cents: 3000
+  reason: duplicate_charge
+
+forbidden_outcomes:
+  - description: "Must NEVER create a second refund record (duplicate side-effect rate must be 0)"
+    duplicate_side_effect: true
+  - description: "Must return original cached idempotency result"
+    cache_bypass: true

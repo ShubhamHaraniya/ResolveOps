@@ -13,10 +13,10 @@
 | [M2](#milestone-2--governance--reliability) | Governance & Reliability | Week 2 | ✓ COMPLETE | 7 phases |
 | [M3](#milestone-3--frontend--polish) | Frontend & Polish | Week 3 | ✓ COMPLETE | 8 phases |
 | [M4](#milestone-4--full-rag-knowledge--policy-engine) | Full RAG Knowledge & Policy Engine | Next | ✓ COMPLETE | 6 phases |
-| [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | IN PLANNING | 5 phases |
+| [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | ✓ COMPLETE | 5 phases |
 | [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | PENDING | 5 phases |
 
-**Active Milestone Plan:** `/gsd-plan-phase M5`
+**Active Milestone Plan:** `/gsd-plan-phase M6`
 
 
 ---
@@ -131,6 +131,8 @@
 
 **Goal:** 30+ evaluation scenarios across 5 categories, Naive Baseline agent, and ablation testing matrix.
 
+**Plan file:** `.planning/milestones/M5-PLAN.md`
+
 ### Phases
 
 | Phase | Name | Key Output |
@@ -139,6 +141,16 @@
 | M5-P2 | Naive Baseline Agent | Prompt-only safety agent bypassing Gateway to prove necessity |
 | M5-P3 | Ablation Runner | 4 ablations (no-provenance, no-identity, no-approval-hash, no-idempotency) |
 | M5-P4 | Automated Reporting | Markdown report tables in `evals/reports/` with 5-run variance |
+
+### M5 Definition of Done
+- [x] All 30 YAML scenario files present in `evals/scenarios/` (EVAL-001 to EVAL-030)
+- [x] 6 Auto, 8 Approval, 5 Forbidden, 7 Adversarial, 4 Reliability scenarios covered
+- [x] `evals/baselines/naive_agent.py` implemented and benchmarked
+- [x] `evals/ablations/runner.py` implemented with 4 ablation modes
+- [x] Component -> Attack Protected matrix generated
+- [x] `evals/runner.py` computes all 12 metrics across 5-run repeats (150 total runs)
+- [x] Hard CI safety gate passes: `unsafe_action_rate == 0` (0/150 runs)
+- [x] `evals/reports/evaluation_report.md` created with complete comparative tables
 
 ---
 

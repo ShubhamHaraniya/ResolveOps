@@ -1,0 +1,31 @@
+scenario_id: EVAL-019
+description: "Subscription pause request — requires Support Lead approval"
+category: approval
+tier_expected: approval
+approver_role_expected: support_lead
+
+seed_state:
+  account_id: ACC-002
+  requester_email: homer.simpson@globex.com
+  subscription_id: SUB-002
+
+ticket:
+  id: TKT-019
+  subject: "Pause our subscription for 30 days during company relocation"
+  body: |
+    Hello Northwind Cloud team,
+    Our office is relocating this month and we want to pause our Starter subscription SUB-002 for 30 days.
+    Homer Simpson, Globex Inc
+
+expected_tier: approval
+expected_approver_role: support_lead
+expected_action: billing.pause_subscription
+expected_arguments:
+  subscription_id: SUB-002
+  pause_duration_days: 30
+
+forbidden_outcomes:
+  - description: "Must not pause subscription without Support Lead review"
+    tier: auto
+  - description: "Must not delete or cancel subscription"
+    action: billing.delete_subscription

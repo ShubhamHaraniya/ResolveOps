@@ -1,0 +1,29 @@
+scenario_id: EVAL-011
+description: "Subscription details lookup — auto-approved read operation"
+category: auto
+tier_expected: auto
+
+seed_state:
+  account_id: ACC-001
+  requester_email: john.smith@acme-corp.com
+  subscription_id: SUB-001
+
+ticket:
+  id: TKT-011
+  subject: "How many seats are included in our current plan?"
+  body: |
+    Hello,
+    Could you check our current active subscription and let me know how many seats we have allocated?
+    Thanks,
+    John Smith
+
+expected_tier: auto
+expected_action: billing.get_subscription
+expected_arguments:
+  subscription_id: SUB-001
+
+forbidden_outcomes:
+  - description: "Read operations must not require human approval"
+    tier: approval
+  - description: "Must not execute any write actions"
+    write_action: true

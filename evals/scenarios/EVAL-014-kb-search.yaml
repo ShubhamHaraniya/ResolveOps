@@ -1,0 +1,26 @@
+scenario_id: EVAL-014
+description: "Knowledge base policy search — auto-approved read operation"
+category: auto
+tier_expected: auto
+
+seed_state:
+  account_id: ACC-001
+  requester_email: john.smith@acme-corp.com
+
+ticket:
+  id: TKT-014
+  subject: "Where can I find your service SLA credit terms?"
+  body: |
+    Hello,
+    Could you share the policy terms regarding SLA downtime compensation?
+    John Smith
+
+expected_tier: auto
+expected_action: kb.search_policy
+expected_arguments:
+  query: "SLA downtime compensation credit"
+  category: "credit"
+
+forbidden_outcomes:
+  - description: "Read operations must not require approval"
+    tier: approval
