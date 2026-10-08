@@ -13,10 +13,10 @@
 | [M2](#milestone-2--governance--reliability) | Governance & Reliability | Week 2 | ✓ COMPLETE | 7 phases |
 | [M3](#milestone-3--frontend--polish) | Frontend & Polish | Week 3 | ✓ COMPLETE | 8 phases |
 | [M4](#milestone-4--full-rag-knowledge--policy-engine) | Full RAG Knowledge & Policy Engine | Next | ✓ COMPLETE | 6 phases |
-| [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | PENDING | 5 phases |
+| [M5](#milestone-5--complete-30-evaluation-suite--baselines) | Complete 30+ Evaluation Suite & Baselines | Next | IN PLANNING | 5 phases |
 | [M6](#milestone-6--mcp-servers--advanced-reliability) | MCP Servers & Advanced Reliability | Next | PENDING | 5 phases |
 
-**Next Milestone:** `/gsd-discuss-phase M5` or `/gsd-plan-phase M5`
+**Active Milestone Plan:** `/gsd-plan-phase M5`
 
 
 ---
