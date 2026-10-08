@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.log
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Env / Secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Docker volumes (local)
+postgres_data/
+qdrant_data/
+redis_data/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/settings.json
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Planning scratch
+.planning/scratch/

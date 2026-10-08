@@ -1,0 +1,179 @@
+version: 3
+effective_date: "2026-01-01"
+status: active
+description: "Northwind Cloud AI Agent Policy Rules v3"
+
+defaults:
+  unknown_tool: forbidden
+  unverified_requester: forbidden
+
+rules:
+  # ── Ticketing ──────────────────────────────────────────────────────────────
+  - id: TKT-001
+    description: "Internal notes are always auto-approved"
+    tool: ticketing.add_internal_note
+    tier: auto
+
+  - id: TKT-002
+    description: "Public replies require support agent approval"
+    tool: ticketing.send_public_reply
+    tier: approval
+    approver_role: support_agent
+
+  # ── Refunds ───────────────────────────────────────────────────────────────
+  - id: REF-001
+    description: "Small refunds (<=50) require support agent approval"
+    tool: billing.issue_refund
+    when:
+      amount_cents: { lte: 5000 }
+      account.strategic: false
+      account.legal_hold: false
+      invoice.age_days: { lte: 30 }
+    tier: approval
+    approver_role: support_agent
+
+  - id: REF-002
+    description: "Medium refunds (50-500) require support lead approval"
+    tool: billing.issue_refund
+    when:
+      amount_cents: { gt: 5000, lte: 50000 }
+      account.legal_hold: false
+    tier: approval
+    approver_role: support_lead
+
+  - id: REF-099
+    description: "Large refunds (>500) are forbidden — escalate to Finance"
+    tool: billing.issue_refund
+    when:
+      amount_cents: { gt: 50000 }
+    tier: forbidden
+    escalate_to: finance
+
+  # ── Credits ───────────────────────────────────────────────────────────────
+  - id: CRD-001
+    description: "Credits under $100 require support agent approval"
+    tool: billing.issue_credit
+    when:
+      amount_cents: { lte: 10000 }
+      account.legal_hold: false
+    tier: approval
+    approver_role: support_agent
+
+  - id: CRD-002
+    description: "Credits $100-$1000 require support lead approval"
+    tool: billing.issue_credit
+    when:
+      amount_cents: { gt: 10000, lte: 100000 }
+      account.legal_hold: false
+    tier: approval
+    approver_role: support_lead
+
+  # ── Plan / Subscription ───────────────────────────────────────────────────
+  - id: PLN-001
+    description: "Plan changes require support agent approval"
+    tool: billing.change_plan
+    when:
+      account.legal_hold: false
+    tier: approval
+    approver_role: support_agent
+
+  - id: PLN-002
+    description: "Subscription pause requires support lead approval"
+    tool: billing.pause_subscription
+    when:
+      account.legal_hold: false
+    tier: approval
+    approver_role: support_lead
+
+  # ── Access ────────────────────────────────────────────────────────────────
+  - id: ACC-001
+    description: "Viewer/member access grants require security reviewer approval"
+    tool: access.grant_access
+    when:
+      role: { in: [viewer, member] }
+      expiry_days: { lte: 30 }
+      requester.is_authorized_contact: true
+    tier: approval
+    approver_role: security_reviewer
+
+  - id: ACC-002
+    description: "MFA reset requires security reviewer approval"
+    tool: access.reset_mfa
+    when:
+      requester.is_authorized_contact: true
+    tier: approval
+    approver_role: security_reviewer
+
+  - id: ACC-099
+    description: "Admin/prod-admin/owner access is always forbidden"
+    tool: access.grant_access
+    when:
+      role: { in: [admin, prod-admin, owner, superuser, root, administrator] }
+    tier: forbidden
+    escalate_to: security
+
+  # ── Cross-cutting: Legal Hold (checked first — overrides all) ─────────────
+  - id: GEN-001
+    description: "Legal hold accounts: ALL actions forbidden, escalate to Legal"
+    tool: "*"
+    when:
+      account.legal_hold: true
+    tier: forbidden
+    escalate_to: legal
+    priority: 1000  # Highest priority — always evaluated first
+
+  # ── Cross-cutting: Strategic Accounts ─────────────────────────────────────
+  - id: GEN-002
+    description: "Strategic accounts: all financial actions require support lead"
+    tool: "billing.*"
+    when:
+      account.strategic: true
+    tier: approval
+    approver_role: support_lead
+    priority: 900
+
+  # ── Read-only operations ──────────────────────────────────────────────────
+  - id: RD-001
+    description: "Invoice lookups are auto-approved"
+    tool: billing.get_invoice
+    tier: auto
+
+  - id: RD-002
+    description: "Subscription lookups are auto-approved"
+    tool: billing.get_subscription
+    tier: auto
+
+  - id: RD-003
+    description: "Invoice list lookups are auto-approved"
+    tool: billing.list_invoices
+    tier: auto
+
+  - id: RD-004
+    description: "Plan change preview is auto-approved (read-only)"
+    tool: billing.preview_plan_change
+    tier: auto
+
+  - id: RD-005
+    description: "CRM account lookups are auto-approved"
+    tool: crm.get_account
+    tier: auto
+
+  - id: RD-006
+    description: "CRM contact lookups are auto-approved"
+    tool: crm.find_contact
+    tier: auto
+
+  - id: RD-007
+    description: "User lookups are auto-approved"
+    tool: access.get_user
+    tier: auto
+
+  - id: RD-008
+    description: "Access grant listing is auto-approved"
+    tool: access.list_grants
+    tier: auto
+
+  - id: RD-009
+    description: "Policy search is auto-approved"
+    tool: kb.search_policy
+    tier: auto

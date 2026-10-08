@@ -1,0 +1,205 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────
+# ResolveOps — Docker Compose
+# All services on the 'resolveops' bridge network.
+# For local dev without Docker, see docs/runbook.md#local-setup
+# ─────────────────────────────────────────────────────────────
+
+networks:
+  resolveops:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+
+services:
+
+  # ── Data layer ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: resolveops
+      POSTGRES_PASSWORD: resolveops
+      POSTGRES_DB: resolveops
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resolveops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Observability ───────────────────────────────────────────
+  langfuse:
+    image: ghcr.io/langfuse/langfuse:2
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3100:3000"   # 3100 to avoid conflict with frontend dev server
+    environment:
+      DATABASE_URL: postgresql://resolveops:resolveops@postgres:5432/resolveops
+      NEXTAUTH_SECRET: langfuse-secret-change-in-prod
+      NEXTAUTH_URL: http://localhost:3100
+      SALT: langfuse-salt-change-in-prod
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/public/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Backend API ──────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://resolveops:resolveops@postgres:5432/resolveops
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      LANGFUSE_HOST: http://langfuse:3000
+      MOCK_TICKETING_URL: http://mock-ticketing:8001
+      MOCK_CRM_URL: http://mock-crm:8002
+      MOCK_BILLING_URL: http://mock-billing:8003
+      MOCK_IAM_URL: http://mock-iam:8004
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Frontend ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    networks:
+      - resolveops
+
+  # ── Mock Backends ────────────────────────────────────────────
+  mock-ticketing:
+    build:
+      context: ./services/mocks
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["uvicorn", "ticketing:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 10s
+      retries: 3
+
+  mock-crm:
+    build:
+      context: ./services/mocks
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["uvicorn", "crm:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "8002:8002"
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      interval: 10s
+      retries: 3
+
+  mock-billing:
+    build:
+      context: ./services/mocks
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["uvicorn", "billing:app", "--host", "0.0.0.0", "--port", "8003"]
+    ports:
+      - "8003:8003"
+    environment:
+      BILLING_ERROR_RATE: "0.1"
+      BILLING_TIMEOUT_SIMULATION: "false"
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8003/health || exit 1"]
+      interval: 10s
+      retries: 3
+
+  mock-iam:
+    build:
+      context: ./services/mocks
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["uvicorn", "iam:app", "--host", "0.0.0.0", "--port", "8004"]
+    ports:
+      - "8004:8004"
+    networks:
+      - resolveops
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8004/health || exit 1"]
+      interval: 10s
+      retries: 3
