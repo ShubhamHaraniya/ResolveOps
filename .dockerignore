@@ -1,0 +1,16 @@
+.git
+.github
+.planning
+docs
+tests
+scripts
+frontend
+**/__pycache__
+**/*.pyc
+**/.venv
+**/node_modules
+**/.next
+*.db
+.env
+.pytest_cache
+.ruff_cache

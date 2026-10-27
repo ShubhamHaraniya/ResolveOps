@@ -112,34 +112,79 @@ def list_tools() -> List[Dict[str, Any]]:
     return TOOLS
 
 
+def _find_account(acc_id: str | None) -> Optional[Dict[str, Any]]:
+    if not acc_id:
+        return None
+    if acc_id in ACCOUNTS:
+        return ACCOUNTS[acc_id]
+    norm = str(acc_id).replace("-", "").upper()
+    for k, v in ACCOUNTS.items():
+        if k.replace("-", "").upper() == norm:
+            return v
+    return None
+
+
 async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Execute a CRM tool call."""
     log.info("mcp_crm.call_tool", tool=name, args=arguments)
 
     if name == "get_account":
         account_id = arguments.get("account_id")
-        if not account_id or account_id not in ACCOUNTS:
+        acct_raw = _find_account(account_id)
+        if not acct_raw:
             return {"error": f"Account '{account_id}' not found", "found": False}
-        acct = dict(ACCOUNTS[account_id])
+        acct = dict(acct_raw)
+        acct_key = acct.get("id", account_id)
+        norm_key = str(acct_key).replace("-", "").upper()
         acct["authorized_contacts"] = [
             c["email"] for c in CONTACTS.values()
-            if c.get("account_id") == account_id and c.get("is_authorized")
+            if str(c.get("account_id", "")).replace("-", "").upper() == norm_key and c.get("is_authorized")
         ]
         return acct
 
     elif name == "find_contact":
-        email = arguments.get("email")
-        if not email or email not in CONTACTS:
+        email = (arguments.get("email") or "").strip().lower()
+        contact = None
+        for k, v in CONTACTS.items():
+            if k.lower() == email:
+                contact = dict(v)
+                break
+
+        if not contact:
+            # Query real database contacts
+            try:
+                from app.db.session import AsyncSessionLocal
+                from app.db.models import Contact as DBContact
+                from sqlalchemy import select
+                async with AsyncSessionLocal() as db:
+                    res = await db.execute(select(DBContact).where(DBContact.email == email))
+                    c = res.scalars().first()
+                    if c:
+                        contact = {
+                            "id": c.id,
+                            "account_id": c.account_id,
+                            "email": c.email,
+                            "name": c.name or c.email,
+                            "is_authorized": c.is_authorized,
+                            "role": c.role or "user",
+                        }
+            except Exception as e:
+                log.warning("mcp_crm.db_contact_lookup_failed", error=str(e))
+
+        if not contact:
             return {"error": f"Contact '{email}' not found", "found": False, "is_authorized": False}
-        contact = dict(CONTACTS[email])
+
         acct_id = contact.get("account_id")
-        if acct_id and acct_id in ACCOUNTS:
-            contact["account"] = ACCOUNTS[acct_id]
+        acct = _find_account(acct_id)
+        if acct:
+            contact["account"] = acct
         return contact
 
     elif name == "get_account_notes":
         account_id = arguments.get("account_id")
-        notes = ACCOUNT_NOTES.get(account_id, [])
+        acct = _find_account(account_id)
+        acct_id = acct.get("id") if acct else account_id
+        notes = ACCOUNT_NOTES.get(acct_id, [])
         return {"account_id": account_id, "notes": notes, "total": len(notes)}
 
     elif name == "update_contact_email":

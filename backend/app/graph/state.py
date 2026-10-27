@@ -3,7 +3,7 @@ LangGraph TicketState — the single source of truth for a workflow run.
 All nodes read from and write to this state.
 Postgres-checkpointed for crash recovery.
 """
-from typing import TypedDict, Literal, Any
+from typing import TypedDict, Literal
 
 
 class TicketState(TypedDict, total=False):
@@ -33,7 +33,6 @@ class TicketState(TypedDict, total=False):
 
     # ── Execution ──────────────────────────────────────────────
     executed: list[dict]                # List of ExecutedAction results
-    compensations: list[dict]           # List of Compensation records (saga)
 
     # ── Control ────────────────────────────────────────────────
     flags: list[str]                    # ["injection_suspected", "identity_mismatch", ...]
@@ -47,6 +46,11 @@ class TicketState(TypedDict, total=False):
     ]
     error: str | None
     escalation_reason: str | None
+
+    # ── Approval & Resumption Control ──────────────────────────
+    resume_approval: bool
+    action_type: str | None
+    approved_args: dict | None
 
     # ── Cost / Observability ───────────────────────────────────
     total_llm_cost_usd: float

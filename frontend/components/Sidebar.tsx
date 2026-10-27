@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -15,14 +15,39 @@ import {
   Settings as SettingsIcon,
   ShieldAlert,
   Server,
-  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/store";
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { approvals, systemHealth, killSwitch } = useApp();
+  const { systemHealth, killSwitch, backendReachable } = useApp();
+  const [livePendingCount, setLivePendingCount] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchPending = async () => {
+      try {
+        const res = await fetch("/api/approvals?status=pending", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          const count = data.total !== undefined ? data.total : (data.approvals?.length || 0);
+          if (isMounted) {
+            setLivePendingCount(count > 0 ? count : undefined);
+          }
+        }
+      } catch {
+        // keep prior count
+      }
+    };
+
+    fetchPending();
+    const interval = setInterval(fetchPending, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const navItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -31,7 +56,7 @@ export function Sidebar() {
       label: "Approvals",
       href: "/approvals",
       icon: CheckCircle2,
-      badge: approvals.length > 0 ? approvals.length : undefined,
+      badge: livePendingCount,
       badgeColor: "bg-amber-500/20 text-amber-400 border border-amber-500/30",
     },
     { label: "Customers", href: "/customers", icon: Users },
@@ -58,7 +83,7 @@ export function Sidebar() {
               </span>
             </div>
             <p className="text-slate-400 text-[11px] leading-tight">
-              Northwind Cloud AI Agent
+              Governed support operations
             </p>
           </div>
         </div>
@@ -118,33 +143,37 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Connected Systems Status */}
+      {/* Backend dependency status (from /ready) */}
       <div className="p-3 border-t border-[#1e293b] bg-[#070d1e]/60">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Server className="w-3 h-3 text-emerald-400" />
-            Connected Systems
+            <Server className="w-3 h-3 text-slate-400" />
+            Dependencies
           </span>
-          <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            7 / 7 UP
-          </span>
+          {!backendReachable && (
+            <span className="text-[10px] text-amber-400 font-mono">backend offline</span>
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-1 text-[10px]">
-          {systemHealth.slice(0, 6).map((svc) => (
+        <div className="space-y-1 text-[10px]">
+          {systemHealth.length === 0 && backendReachable && (
+            <div className="text-slate-500">Loading...</div>
+          )}
+          {systemHealth.map((svc) => (
             <div
               key={svc.name}
-              className="px-2 py-1 rounded bg-[#0f172a] border border-[#1e293b]/70 flex items-center justify-between text-slate-300 truncate"
-              title={`${svc.name}: ${svc.latency_ms}ms`}
+              className="px-2 py-1 rounded bg-[#0f172a] border border-[#1e293b]/70 flex items-center justify-between text-slate-300"
             >
-              <span className="truncate pr-1 text-[10px] text-slate-400">{svc.name.split(" ")[0]}</span>
-              <span className="text-emerald-400 font-mono text-[9px]">{svc.latency_ms}ms</span>
+              <span className="truncate pr-1 text-slate-400">{svc.name}</span>
+              <span
+                className={cn(
+                  "font-mono text-[9px]",
+                  svc.status === "healthy" ? "text-emerald-400" : "text-amber-400"
+                )}
+              >
+                {svc.status === "healthy" ? "up" : "down"}
+              </span>
             </div>
           ))}
-        </div>
-        <div className="mt-2 text-[10px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-800/80">
-          <span>Groq gpt-oss-120b</span>
-          <span className="text-blue-400 font-mono">140ms</span>
         </div>
       </div>
     </aside>

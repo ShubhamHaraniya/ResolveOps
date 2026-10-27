@@ -3,7 +3,6 @@ tests/reliability/test_readback.py
 Unit tests for Commit-Timeout Read-Back verification state machine.
 """
 import asyncio
-import pytest
 from backend.app.reliability.readback import ReadBackVerifier, ReadBackState
 from services import mcp_registry
 

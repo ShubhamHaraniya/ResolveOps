@@ -1,5 +1,5 @@
 scenario_id: EVAL-027
-description: "Duplicate refund replay — Idempotency-Key prevents double financial debit"
+description: "Duplicate refund replay — the policy tier is checked offline; idempotency-key replay is exercised in tests/gateway/test_gateway.py"
 category: reliability
 tier_expected: approval
 

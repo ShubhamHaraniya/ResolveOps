@@ -3,7 +3,6 @@ plan_action node — call Groq primary model to propose resolution actions.
 Produces a ProposedResolution with typed actions, RAG citations, draft reply.
 NEVER calls backends directly. NEVER makes authorization decisions.
 """
-import json
 import structlog
 
 from app.graph.state import TicketState
@@ -87,6 +86,15 @@ async def plan_action_node(state: TicketState) -> dict:
     import re
     body_text = re.sub(r"<[^>]+>", " ", ticket.get("body_html") or ticket.get("body", "")).strip()
 
+    # Include multi-turn conversation history if available
+    thread_messages = ticket.get("messages") or []
+    if thread_messages:
+        thread_lines = ["\n\n--- CONVERSATION THREAD ---"]
+        for m in thread_messages:
+            s_type = m.get("sender_type", "customer").upper()
+            thread_lines.append(f"[{s_type}]: {m.get('body', '')}")
+        body_text += "\n" + "\n".join(thread_lines)
+
     log.info("node.plan_action.start", ticket_id=ticket_id, injection_suspected=injection_suspected)
 
     # Build planning prompt
@@ -127,6 +135,21 @@ async def plan_action_node(state: TicketState) -> dict:
         proposal = call_result.result
         cost = call_result.usage.estimated_cost_usd or 0.0
 
+        try:
+            from app.observability.langfuse_client import get_telemetry
+            get_telemetry().record_generation(
+                trace_id=state.get("langfuse_trace_id") or run_id or ticket_id,
+                name="plan_action",
+                model=settings.groq_model_primary,
+                prompt=planning_prompt[:1500],
+                completion=proposal.model_dump_json() if hasattr(proposal, "model_dump_json") else str(proposal),
+                latency_ms=getattr(call_result, "latency_ms", 0.0),
+                usage={"prompt_tokens": call_result.usage.prompt_tokens, "completion_tokens": call_result.usage.completion_tokens},
+                cost_usd=cost,
+            )
+        except Exception:
+            pass
+
         # Safety post-processing: if injection suspected, strip financial actions
         if injection_suspected:
             safe_actions = [
@@ -146,6 +169,63 @@ async def plan_action_node(state: TicketState) -> dict:
                 "risk_flags": list(set(proposal.risk_flags + ["injection_suspected"])),
             })
 
+        # Amount Mismatch Guardrail: prevent silent substitution of requested amounts
+        full_ticket_text = f"{ticket.get('subject', '')} {body_text}"
+        dollar_matches = re.findall(r"\$(\d+(?:\.\d{1,2})?)", full_ticket_text)
+        if not dollar_matches:
+            word_matches = re.findall(r"(?:refund|charge|credit|pay)\s*(?:of\s*)?\$?(\d+(?:\.\d{1,2})?)", full_ticket_text.lower())
+            if word_matches:
+                dollar_matches = word_matches
+
+        invoices = context.get("invoices", [])
+        if dollar_matches and invoices:
+            try:
+                requested_val = float(dollar_matches[0])
+                requested_cents = int(requested_val * 100)
+                # Check whether any candidate invoice matches requested amount
+                exact_match = any(inv.get("amount_cents") == requested_cents for inv in invoices)
+
+                if requested_cents > 0 and not exact_match:
+                    log.warning("node.plan_action.amount_mismatch_detected", requested_cents=requested_cents, invoices=len(invoices))
+                    flags = list(set(flags + ["amount_mismatch"]))
+                    proposal_flags = list(set(proposal.risk_flags + ["amount_mismatch"]))
+
+                    inv_summaries = [f"${inv.get('amount_cents', 0)/100:.2f} ({inv.get('id', 'INV')})" for inv in invoices[:3]]
+                    inv_text = ", ".join(inv_summaries)
+
+                    clarify_reply = (
+                        f"Hi {ticket.get('requester_email', '').split('@')[0].capitalize()},\n\n"
+                        f"We reviewed your request for a refund of ${requested_val:.2f}. "
+                        f"However, our billing records show the charges on file are for {inv_text}. "
+                        f"Because the requested amount (${requested_val:.2f}) does not match our invoice records, "
+                        f"we cannot issue an automated refund without clarification.\n\n"
+                        f"Could you please confirm your invoice number or provide additional receipt details so we can assist you promptly?\n\n"
+                        f"Thank you,\nNorthwind Cloud Support"
+                    )
+
+                    from app.llm.schemas import ProposedAction
+                    safe_actions = [a for a in proposal.actions if not a.tool.startswith("billing.") and a.tool != "ticketing.send_public_reply"]
+                    safe_actions.append(ProposedAction(
+                        tool="ticketing.send_public_reply",
+                        arguments={"ticket_id": ticket_id, "body": clarify_reply},
+                        reason=f"Amount mismatch: customer requested ${requested_val:.2f} but invoices on file are {inv_text}",
+                        risk_level="medium",
+                    ))
+
+                    proposal = proposal.model_copy(update={
+                        "actions": safe_actions,
+                        "risk_flags": proposal_flags,
+                        "clarification_needed": True,
+                        "clarification_question": f"Customer requested ${requested_val:.2f}, but invoices on file are {inv_text}. Need invoice confirmation.",
+                        "reasoning_summary": (
+                            f"Amount mismatch: Ticket requests ${requested_val:.2f}, but candidate invoices on file are {inv_text}. "
+                            f"Prohibited unverified refund and drafted clarification reply."
+                        ),
+                        "draft_reply": clarify_reply,
+                    })
+            except Exception as amt_err:
+                log.warning("node.plan_action.amount_check_failed", error=str(amt_err))
+
         log.info(
             "node.plan_action.done",
             ticket_id=ticket_id,
@@ -163,17 +243,4 @@ async def plan_action_node(state: TicketState) -> dict:
 
     except Exception as e:
         log.error("node.plan_action.failed", error=str(e), ticket_id=ticket_id)
-        return {
-            "proposal": {
-                "actions": [],
-                "rag_citations": [],
-                "draft_reply": "",
-                "risk_flags": ["planning_failed"],
-                "reasoning_summary": f"Planning failed: {str(e)[:200]}",
-                "clarification_needed": True,
-                "clarification_question": "Planning encountered an error. Please escalate to a human agent.",
-            },
-            "flags": flags + ["planning_failed"],
-            "total_llm_cost_usd": state.get("total_llm_cost_usd", 0.0),
-            "total_llm_calls": state.get("total_llm_calls", 0) + 1,
-        }
+        raise

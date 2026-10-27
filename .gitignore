@@ -16,6 +16,8 @@ build/
 htmlcov/
 .coverage
 *.log
+*.db
+*.sqlite3
 
 # Node
 node_modules/
@@ -51,3 +53,9 @@ Thumbs.db
 
 # Planning scratch
 .planning/scratch/
+scratch/
+
+# Generated evaluation reports (run `python -m evals.runner` / `python -m evals.rag_benchmark`)
+evals/reports/*
+!evals/reports/.gitkeep
+

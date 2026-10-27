@@ -5,6 +5,14 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    rules: {
+      // The UI reads loosely typed JSON from the API in many places; typing every payload is future work.
+      "@typescript-eslint/no-explicit-any": "off",
+      // Fetch-on-mount in useEffect is the pattern used across the pages.
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

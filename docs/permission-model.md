@@ -1,43 +1,53 @@
-# ResolveOps — Permission Model & Capability Matrix
+# Permission model
 
-> Customer: Northwind Cloud  
-> Version: 2026.10  
-> Security Posture: Zero Trust / Default Deny
+Authorization is decided by deterministic code (`policy/rules.yaml` + `backend/app/policy/engine.py`) and enforced
+by the gateway (`services/gateway/gateway.py`). The LLM only proposes actions.
 
----
+## Tiers
 
-## 1. Tool Capability Classification
+| Tier | Meaning |
+|---|---|
+| `auto` | May execute without a human. |
+| `approval` | Requires a human reviewer's approval of the exact arguments. |
+| `forbidden` | Never executes; the run is escalated. |
 
-Every MCP tool exposed to the ResolveOps agent is categorized into one of four deterministic permission tiers:
+If several proposed actions get different tiers, the most restrictive wins. A tool with no matching rule is `forbidden`.
 
-| Tier | Policy Behavior | Human Involvement | Examples |
+## Rules in `policy/rules.yaml` (version 3)
+
+| Rule | Tool | Condition | Tier |
 |---|---|---|---|
-| **Tier 1: Safe Read-Only** | Auto-executed | None | `billing.get_invoice`, `crm.get_account`, `kb.search` |
-| **Tier 2: Low-Risk Write** | Approval Required | Support Agent | `billing.issue_refund` (&le; $100), `ticket.add_note` |
-| **Tier 3: High-Risk Write** | Approval Required | Support Lead / Security Lead | `billing.issue_refund` (&gt; $100), `iam.reset_mfa` |
-| **Tier 4: Permanently Forbidden** | Hard Block (403) | None (Agent blocked) | `iam.grant_role` (`prod-admin`, `admin`), `billing.refund` (&gt; $50k) |
+| TKT-001 | `ticketing.add_internal_note` | — | auto |
+| TKT-002 | `ticketing.send_public_reply` | — | approval (support_agent) |
+| TKT-003 | `ticketing.set_tags` | — | auto |
+| REF-001 | `billing.issue_refund` | ≤ $50, not strategic, no legal hold, invoice ≤ 30 days old | approval (support_agent) |
+| REF-002 | `billing.issue_refund` | $50–$500, no legal hold | approval (support_lead) |
+| REF-099 | `billing.issue_refund` | > $500 | forbidden → finance |
+| CRD-001 | `billing.issue_credit` | ≤ $100, no legal hold | approval (support_agent) |
+| CRD-002 | `billing.issue_credit` | $100–$1000, no legal hold | approval (support_lead) |
+| PLN-001 | `billing.change_plan` | no legal hold | approval (support_agent) |
+| PLN-002 | `billing.pause_subscription` | no legal hold | approval (support_lead) |
+| ACC-001 | `access.grant_access` | role viewer/member, expiry ≤ 30 days, requester is an authorized contact | approval (security_reviewer) |
+| ACC-002 | `access.reset_mfa` | requester is an authorized contact | approval (security_reviewer) |
+| ACC-099 | `access.grant_access` | role admin / prod-admin / owner / superuser / root / administrator | forbidden → security |
+| SEC-001 | any (`*`) | injection suspected | forbidden → security (priority 1100) |
+| GEN-001 | any (`*`) | account on legal hold | forbidden → legal (priority 1000) |
+| GEN-002 | `billing.*` | strategic account | approval (support_lead) (priority 900) |
+| RD-001 … RD-009 | `billing.get_invoice`, `billing.get_subscription`, `billing.list_invoices`, `billing.preview_plan_change`, `crm.get_account`, `crm.find_contact`, `access.get_user`, `access.list_grants`, `kb.search_policy` | — | auto |
 
----
+Refund and credit amounts are in cents in the rule conditions.
 
-## 2. Granular Authorization Matrix
+## Approvals
 
-| Tool Invocations | Pre-conditions | Evaluation Rule | Required Role | Risk Assessment |
-|---|---|---|---|---|
-| `billing.get_invoice` | Verified tenant | READ-001 | Autonomous | Zero side-effect |
-| `crm.get_account` | Requester domain match | READ-002 | Autonomous | Zero side-effect |
-| `ticket.add_internal_note` | Active ticket | NOTE-001 | Autonomous | Internal documentation only |
-| `billing.issue_refund` (&le; $100) | Duplicate charge verified | REF-001 | Support Agent | Low financial liability |
-| `billing.issue_refund` ($101 - $1,000) | Invoice valid | REF-002 | Support Lead | Moderate financial liability |
-| `billing.issue_refund` (&gt; $50,000) | Any | REF-999 | FORBIDDEN | Catastrophic financial risk |
-| `iam.reset_mfa` | Hardware MFA verified contact | IAM-002 | Security Reviewer | Account takeover mitigation |
-| `iam.grant_role` (`prod-admin`) | Any | ACC-099 | FORBIDDEN | Privilege escalation risk |
-| `crm.update_plan` | Strategic / Legal hold | GEN-001 | FORBIDDEN | Compliance violation risk |
+When a run reaches `approval_interrupt` an approval record is created holding the tool, the arguments, an argument
+hash, and a 24-hour expiry. Reviewers use `POST /api/approvals/{id}/approve | reject | edit | escalate`.
+At execution the gateway requires that the approval belongs to the same run, ticket and tool, has status `approved`,
+is not expired, and that its hash matches the arguments being executed — editing arguments after approval
+invalidates it.
 
----
+Limitations to be aware of:
 
-## 3. Residual Risk Analysis
-
-1. **Compromised Authorized Contact:** If an attacker compromises an authorized user's primary SSO credentials, they can request refunds up to $100.  
-   *Mitigation:* Anomaly detection on ticket volume, daily refund caps per tenant ($500), and mandatory human review before dispatch.
-2. **Reviewer Rubber-Stamping:** Human reviewers approving actions without reading the exact arguments.  
-   *Mitigation:* The UI forces preview of exact financial amounts, invoice dates, and risk badges before enabling the "Approve" button.
+- The REST API has no authentication. `approver_role` is stored with the approval but is **not enforced**, and
+  `reviewer_id` is whatever the client sends.
+- Approval records and the other gateway state are in-memory (see [failure-modes.md](failure-modes.md)).
+- One approval-tier action per run is supported.

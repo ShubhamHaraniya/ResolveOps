@@ -10,8 +10,6 @@ import hmac
 import json
 import time
 import uuid
-from datetime import datetime, UTC, timedelta
-from typing import Any
 
 # Import from config (lazy to avoid circular)
 def _get_secret() -> str:
@@ -25,10 +23,10 @@ def _get_secret() -> str:
 class ScopedJWT:
     """
     Simple HMAC-SHA256 scoped token (no external JWT library needed).
-    
+
     Payload: {run_id, ticket_id, tool, args_hash, iat, exp}
     Signature: HMAC-SHA256(header.payload, secret)
-    
+
     Properties:
     - Bound to exactly one tool call with specific args
     - Expires in 1 hour by default (approval tokens: 24h)
@@ -127,14 +125,3 @@ def make_args_hash(tool: str, args: dict) -> str:
     normalized = json.dumps(args, sort_keys=True, separators=(",", ":"))
     content = f"{tool}:{normalized}"
     return hashlib.sha256(content.encode()).hexdigest()
-
-
-# Singleton
-_jwt_instance: ScopedJWT | None = None
-
-
-def get_jwt() -> ScopedJWT:
-    global _jwt_instance
-    if _jwt_instance is None:
-        _jwt_instance = ScopedJWT()
-    return _jwt_instance

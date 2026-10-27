@@ -3,7 +3,7 @@ Unified RAG Policy Service for ResolveOps.
 Exposes high-level search_policies API combining dense retrieval, BM25,
 Reciprocal Rank Fusion, FlashRank neural reranking, and policy conflict resolution.
 """
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 import structlog
 
 from rag.retrieval.hybrid import search_hybrid_candidates

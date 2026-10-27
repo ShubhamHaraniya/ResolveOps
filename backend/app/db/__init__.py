@@ -1,10 +1,8 @@
-"""DB package — imports all models so Alembic auto-detects them."""
+"""DB package: importing it registers every model on ``Base.metadata``."""
 from app.db.models import (  # noqa: F401
     Base,
-    Account, Contact, Subscription, Invoice, Refund, Credit, AccessGrant,
-    Ticket, TicketMessage, WorkflowRun, ToolCall,
-    PolicyVersion, PolicyDecisionRecord, Approval, AuditLog,
-    EvaluationRun, ScenarioResult, OutboxEvent, IdempotencyRecord,
+    Account, Contact, Subscription, Invoice,
+    Ticket, TicketMessage, WorkflowRun, Approval, AuditLog,
 )
 
 __all__ = ["Base"]

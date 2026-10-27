@@ -8,7 +8,6 @@ from backend.app.reliability.circuit_breaker import (
     CircuitBreaker,
     CircuitState,
     CircuitOpenError,
-    get_circuit_breaker,
 )
 
 

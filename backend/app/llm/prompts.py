@@ -88,8 +88,14 @@ RULES:
 3. All amount fields are in CENTS (integer). $30 = 3000.
 4. reason field must be one of: duplicate_charge, billing_error, service_outage, cancellation_window, other
 5. Use ONLY identifiers found in the verified system data below. Never invent IDs.
-6. If identity_verified=False, only propose: ticketing.add_internal_note (to request identity verification).
-7. If no clear action is needed, propose ticketing.add_internal_note as a status update only.
+6. If identity_verified=False, only propose: ticketing.add_internal_note (to request identity verification). Never propose refunds.
+7. AMOUNT INTEGRITY: Always cross-reference any dollar amount requested in <ticket_content> with invoices in VERIFIED SYSTEM DATA.
+   - If customer requests a refund for $X (e.g. $90) and NO invoice matches that amount, or requested amount exceeds the invoice:
+     * NEVER unilaterally substitute or propose a different refund amount (e.g., do NOT propose $30 when $90 was requested).
+     * Add "amount_mismatch" to risk_flags.
+     * Set clarification_needed=True and populate clarification_question.
+     * Propose ticketing.send_public_reply explaining that invoices on file are for a different amount and request clarification.
+8. If no clear action is needed or possible, propose ticketing.add_internal_note as a status update.
 
 Output a JSON object matching the ProposedResolution schema.
 """
@@ -136,6 +142,8 @@ You are a customer support reply assistant for Northwind Cloud.
 Write a professional, empathetic reply to the customer based on what was actually done.
 Use first-person plural (we, our team).
 Be specific about what was done. Do not make promises about what will happen.
+NEVER claim a refund has been processed unless actual execution of billing.issue_refund took place.
+If identity is unverified or amount does not match, draft a clarification or status update.
 Do not reveal internal system details, rule IDs, or policy engine decisions.
 {INJECTION_RESISTANCE}
 """

@@ -33,16 +33,15 @@ class ReadBackVerifier:
         """
         Probe backend system to determine if the timed-out mutation was committed.
         """
-        log.warn("readback.reconciliation_initiated", tool=tool, idempotency_key=idempotency_key)
+        log.warning("readback.reconciliation_initiated", tool=tool, idempotency_key=idempotency_key)
 
         if tool == "billing.issue_refund":
             invoice_id = args.get("invoice_id")
-            amount_cents = args.get("amount_cents", 0)
 
             try:
                 # Probe invoice state
-                inv = await mcp_registry.dispatch_tool("billing.get_invoice", {"invoice_id": invoice_id})
-                
+                await mcp_registry.dispatch_tool("billing.get_invoice", {"invoice_id": invoice_id})
+
                 # Check MCP billing in-memory idempotency store
                 from services.mcp_billing.server import _idempotency_store, _refunds
                 if idempotency_key and idempotency_key in _idempotency_store:

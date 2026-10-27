@@ -6,10 +6,9 @@ import uuid
 from datetime import datetime, UTC
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Enum, Float, ForeignKey,
-    Integer, String, Text, JSON, Index, UniqueConstraint,
+    Boolean, Column, DateTime, Enum, ForeignKey,
+    Integer, String, Text, JSON, Index,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 import enum
 
@@ -63,12 +62,6 @@ class TicketUrgency(str, enum.Enum):
     critical = "critical"
 
 
-class PolicyTier(str, enum.Enum):
-    auto = "auto"
-    approval = "approval"
-    forbidden = "forbidden"
-
-
 class ApprovalStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"
@@ -86,13 +79,8 @@ class WorkflowStatus(str, enum.Enum):
     failed = "failed"
 
 
-class AccessRole(str, enum.Enum):
-    viewer = "viewer"
-    member = "member"
-    # admin and prod-admin are deliberately NOT included
-
-
 class AuditEvent(str, enum.Enum):
+    received = "received"
     proposed = "proposed"
     policy_decision = "policy_decision"
     approval_requested = "approval_requested"
@@ -102,8 +90,10 @@ class AuditEvent(str, enum.Enum):
     executed = "executed"
     verified = "verified"
     failed = "failed"
-    compensated = "compensated"
     escalated = "escalated"
+    tool_call_start = "tool_call_start"
+    tool_call_result = "tool_call_result"
+    tool_call_denied = "tool_call_denied"
 
 
 # ─── Core Business Data ────────────────────────────────────────────────────
@@ -111,7 +101,7 @@ class AuditEvent(str, enum.Enum):
 class Account(Base):
     __tablename__ = "accounts"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    id = Column(String(64), primary_key=True, default=new_uuid)
     name = Column(String(255), nullable=False, index=True)
     plan = Column(Enum(AccountPlan), nullable=False, default=AccountPlan.starter)
     arr_cents = Column(Integer, nullable=False, default=0)  # Annual Recurring Revenue
@@ -131,8 +121,8 @@ class Account(Base):
 class Contact(Base):
     __tablename__ = "contacts"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    account_id = Column(UUID(as_uuid=False), ForeignKey("accounts.id"), nullable=False)
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    account_id = Column(String(64), ForeignKey("accounts.id"), nullable=False)
     email = Column(String(255), nullable=False, index=True)
     name = Column(String(255))
     is_authorized = Column(Boolean, nullable=False, default=False)
@@ -148,8 +138,8 @@ class Contact(Base):
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    account_id = Column(UUID(as_uuid=False), ForeignKey("accounts.id"), nullable=False)
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    account_id = Column(String(64), ForeignKey("accounts.id"), nullable=False)
     plan = Column(Enum(AccountPlan), nullable=False)
     seats = Column(Integer, default=1)
     status = Column(String(50), default="active")
@@ -164,9 +154,9 @@ class Subscription(Base):
 class Invoice(Base):
     __tablename__ = "invoices"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    account_id = Column(UUID(as_uuid=False), ForeignKey("accounts.id"), nullable=False)
-    subscription_id = Column(UUID(as_uuid=False), ForeignKey("subscriptions.id"))
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    account_id = Column(String(64), ForeignKey("accounts.id"), nullable=False)
+    subscription_id = Column(String(64), ForeignKey("subscriptions.id"))
     amount_cents = Column(Integer, nullable=False)
     status = Column(String(50), default="paid")  # paid, unpaid, disputed
     invoice_date = Column(DateTime(timezone=True), default=now_utc)
@@ -174,50 +164,6 @@ class Invoice(Base):
 
     account = relationship("Account", back_populates="invoices")
     subscription = relationship("Subscription", back_populates="invoices")
-    refunds = relationship("Refund", back_populates="invoice")
-
-
-class Refund(Base):
-    __tablename__ = "refunds"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    invoice_id = Column(UUID(as_uuid=False), ForeignKey("invoices.id"), nullable=False)
-    amount_cents = Column(Integer, nullable=False)
-    reason = Column(String(100), nullable=False)
-    idempotency_key = Column(String(255), unique=True, nullable=False)
-    status = Column(String(50), default="completed")
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-
-    invoice = relationship("Invoice", back_populates="refunds")
-
-    __table_args__ = (Index("ix_refunds_idempotency", "idempotency_key"),)
-
-
-class Credit(Base):
-    __tablename__ = "credits"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    account_id = Column(UUID(as_uuid=False), ForeignKey("accounts.id"), nullable=False)
-    amount_cents = Column(Integer, nullable=False)
-    reason = Column(String(255))
-    idempotency_key = Column(String(255), unique=True, nullable=False)
-    status = Column(String(50), default="active")
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-
-    __table_args__ = (Index("ix_credits_idempotency", "idempotency_key"),)
-
-
-class AccessGrant(Base):
-    __tablename__ = "access_grants"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    account_id = Column(UUID(as_uuid=False), ForeignKey("accounts.id"), nullable=False)
-    user_email = Column(String(255), nullable=False)
-    role = Column(Enum(AccessRole), nullable=False)
-    granted_by = Column(String(255))
-    expires_at = Column(DateTime(timezone=True))
-    status = Column(String(50), default="active")
-    created_at = Column(DateTime(timezone=True), default=now_utc)
 
 
 # ─── Ticketing ─────────────────────────────────────────────────────────────
@@ -225,8 +171,8 @@ class AccessGrant(Base):
 class Ticket(Base):
     __tablename__ = "tickets"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    account_id = Column(UUID(as_uuid=False), ForeignKey("accounts.id"))
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    account_id = Column(String(64), ForeignKey("accounts.id"))
     requester_email = Column(String(255), nullable=False, index=True)
     subject = Column(String(500), nullable=False)
     body_html = Column(Text)
@@ -246,8 +192,8 @@ class Ticket(Base):
 class TicketMessage(Base):
     __tablename__ = "ticket_messages"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    ticket_id = Column(UUID(as_uuid=False), ForeignKey("tickets.id"), nullable=False)
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    ticket_id = Column(String(64), ForeignKey("tickets.id"), nullable=False)
     author = Column(String(255))
     body = Column(Text)
     is_internal = Column(Boolean, default=False)
@@ -261,62 +207,18 @@ class TicketMessage(Base):
 class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    ticket_id = Column(UUID(as_uuid=False), ForeignKey("tickets.id"), nullable=False)
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    ticket_id = Column(String(64), ForeignKey("tickets.id"), nullable=False)
     status = Column(Enum(WorkflowStatus), default=WorkflowStatus.running)
     started_at = Column(DateTime(timezone=True), default=now_utc)
     completed_at = Column(DateTime(timezone=True))
     error = Column(Text)
     langfuse_trace_id = Column(String(255))
+    nodes_timeline = Column(JSON, default=list)
+    state_json = Column(JSON, default=dict)
 
     ticket = relationship("Ticket", back_populates="runs")
-    tool_calls = relationship("ToolCall", back_populates="run")
-    policy_decisions = relationship("PolicyDecisionRecord", back_populates="run")
     approvals = relationship("Approval", back_populates="run")
-
-
-class ToolCall(Base):
-    __tablename__ = "tool_calls"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    run_id = Column(UUID(as_uuid=False), ForeignKey("workflow_runs.id"), nullable=False)
-    tool = Column(String(255), nullable=False)
-    args_hash = Column(String(64))  # SHA256
-    args_redacted = Column(JSON)
-    result_status = Column(String(50))  # success, failed, idempotent_skip
-    latency_ms = Column(Float)
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-
-    run = relationship("WorkflowRun", back_populates="tool_calls")
-
-
-# ─── Policy ────────────────────────────────────────────────────────────────
-
-class PolicyVersion(Base):
-    __tablename__ = "policy_versions"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    document_id = Column(String(255), nullable=False)
-    version = Column(Integer, nullable=False)
-    status = Column(String(50), default="active")  # active, deprecated
-    effective_date = Column(DateTime(timezone=True))
-    loaded_at = Column(DateTime(timezone=True), default=now_utc)
-
-    __table_args__ = (UniqueConstraint("document_id", "version"),)
-
-
-class PolicyDecisionRecord(Base):
-    __tablename__ = "policy_decisions"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    run_id = Column(UUID(as_uuid=False), ForeignKey("workflow_runs.id"), nullable=False)
-    tool = Column(String(255))
-    tier = Column(Enum(PolicyTier))
-    rule_id = Column(String(50))
-    reason = Column(Text)
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-
-    run = relationship("WorkflowRun", back_populates="policy_decisions")
 
 
 # ─── Approvals ─────────────────────────────────────────────────────────────
@@ -324,11 +226,11 @@ class PolicyDecisionRecord(Base):
 class Approval(Base):
     __tablename__ = "approvals"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    run_id = Column(UUID(as_uuid=False), ForeignKey("workflow_runs.id"), nullable=False)
-    ticket_id = Column(UUID(as_uuid=False), ForeignKey("tickets.id"), nullable=False)
+    id = Column(String(64), primary_key=True, default=new_uuid)
+    run_id = Column(String(64), ForeignKey("workflow_runs.id"), nullable=False)
+    ticket_id = Column(String(64), ForeignKey("tickets.id"), nullable=False)
     tool = Column(String(255), nullable=False)
-    args_hash = Column(String(64), nullable=False)  # SHA256(ticket_id:tool:sorted_args)
+    args_hash = Column(String(64), nullable=False)  # SHA256(tool:sorted_json(args))
     args_redacted = Column(JSON)
     args_normalized = Column(JSON)  # full args for hash validation
     policy_rule = Column(String(50))
@@ -350,7 +252,7 @@ class Approval(Base):
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    id = Column(String(64), primary_key=True, default=new_uuid)
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     run_id = Column(String(255))
     ticket_id = Column(String(255), index=True)
@@ -375,60 +277,3 @@ class AuditLog(Base):
     )
 
 
-# ─── Evaluation ────────────────────────────────────────────────────────────
-
-class EvaluationRun(Base):
-    __tablename__ = "evaluation_runs"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    scenario_id = Column(String(50), nullable=False)
-    run_number = Column(Integer, nullable=False)
-    result = Column(String(50))  # pass, fail
-    unsafe_action = Column(Boolean, default=False)
-    duplicate_effect = Column(Boolean, default=False)
-    actual_tier = Column(String(50))
-    expected_tier = Column(String(50))
-    latency_ms = Column(Float)
-    details = Column(JSON)
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-
-
-class ScenarioResult(Base):
-    __tablename__ = "scenario_results"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    scenario_id = Column(String(50), nullable=False, index=True)
-    total_runs = Column(Integer, default=0)
-    pass_count = Column(Integer, default=0)
-    fail_count = Column(Integer, default=0)
-    unsafe_count = Column(Integer, default=0)
-    pass_rate = Column(Float)
-    last_run_at = Column(DateTime(timezone=True))
-
-
-# ─── Reliability ───────────────────────────────────────────────────────────
-
-class OutboxEvent(Base):
-    __tablename__ = "outbox_events"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    event_type = Column(String(100), nullable=False)
-    payload = Column(JSON, nullable=False)
-    status = Column(String(50), default="pending")  # pending, processed, failed
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-    processed_at = Column(DateTime(timezone=True))
-
-    __table_args__ = (Index("ix_outbox_status", "status"),)
-
-
-class IdempotencyRecord(Base):
-    __tablename__ = "idempotency_records"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    key = Column(String(64), unique=True, nullable=False)  # SHA256 hash
-    tool = Column(String(255))
-    result = Column(JSON)
-    result_status = Column(String(50))
-    created_at = Column(DateTime(timezone=True), default=now_utc)
-
-    __table_args__ = (Index("ix_idempotency_key", "key"),)

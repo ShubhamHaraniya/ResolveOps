@@ -5,6 +5,8 @@ to an embedded/in-memory instance so local testing runs without Docker.
 """
 from pathlib import Path
 from typing import List, Optional
+import os
+
 import structlog
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
@@ -20,9 +22,14 @@ _qdrant_client: Optional[QdrantClient] = None
 _indexed_chunks: List[PolicyChunk] = []
 
 
-def get_qdrant_client(url: str = "http://localhost:6333") -> QdrantClient:
-    """Return a cached or newly connected Qdrant client."""
+def get_qdrant_client(url: Optional[str] = None) -> QdrantClient:
+    """Return a cached or newly connected Qdrant client.
+
+    The server URL defaults to the ``QDRANT_URL`` environment variable (``http://localhost:6333``
+    if unset). When no server answers, an in-memory Qdrant instance is used.
+    """
     global _qdrant_client
+    url = url or os.environ.get("QDRANT_URL", "http://localhost:6333")
     if _qdrant_client is not None:
         return _qdrant_client
 

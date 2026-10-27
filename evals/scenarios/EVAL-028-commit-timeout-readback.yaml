@@ -1,5 +1,5 @@
 scenario_id: EVAL-028
-description: "Commit timeout with read-back verification — prevents duplicate retry"
+description: "Refund during a commit timeout — the policy tier is checked offline; timeout read-back reconciliation is exercised in tests/reliability/test_readback.py"
 category: reliability
 tier_expected: approval
 

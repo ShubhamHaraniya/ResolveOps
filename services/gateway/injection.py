@@ -29,7 +29,7 @@ INJECTION_PATTERNS: list[tuple[str, float, str]] = [
     (r"(?i)ignore\s+(company|security|refund|billing)\s+polic(y|ies)", 0.90, "ignore_policy"),
     (r"(?i)(pre-?authorized|pre-?approved)\s+by\s+(ceo|cfo|finance|management)", 0.85, "false_authority_claim"),
     (r"(?i)you\s+are\s+now\s+in\s+(admin|root|superuser|god)\s+mode", 0.95, "privilege_escalation"),
-    (r"(?i)bypass\s+(security|policy|check|restriction|gateway)", 0.90, "bypass_request"),
+    (r"(?i)bypass\s+(all\s+)?(security|policy|polic(y|ies)|checks?|restrictions?|gateway)", 0.90, "bypass_request"),
     (r"(?i)force\s+(execute|run|apply|refund|credit)", 0.80, "force_execute"),
     (r"(?i)this\s+(has\s+been|is)\s+(already\s+)?approved\s+by\s+(ceo|finance|legal)", 0.85, "false_approval_claim"),
     (r"(?i)grant\s+(me\s+)?(admin|root|superuser|full)\s+access", 0.85, "admin_access_request"),
@@ -39,6 +39,17 @@ INJECTION_PATTERNS: list[tuple[str, float, str]] = [
     (r"(?i)\[\s*INST\s*\]|\[SYS\]", 0.75, "llm_prompt_tag"),
     (r"(?i)forget\s+(everything|all|previous)", 0.85, "memory_wipe"),
     (r"(?i)disregard\s+(all|previous|your)\s+(instructions|rules|guidelines)", 0.90, "disregard_instructions"),
+    # Authority / exemption claims and instructions aimed at an AI agent
+    (r"(?i)\b(executive|exec)\s+pre-?clearance", 0.90, "false_authority_claim"),
+    (r"(?i)\bceo\s+(has\s+)?(approved|authori[sz]ed)", 0.85, "false_approval_claim"),
+    (r"(?i)special\s+exemption", 0.60, "exemption_claim"),
+    (r"(?i)exempt\s+from\s+(all\s+)?(standard\s+)?(approval|polic)", 0.85, "exemption_claim"),
+    (r"(?i)attention[,:]?\s+ai\s+(assistant|agent)", 0.90, "addresses_ai_agent"),
+    (r"(?i)without\s+(requiring\s+)?(any\s+)?human\s+review", 0.85, "skip_human_review"),
+    # Code / SQL / shell payloads
+    (r"(?i);\s*drop\s+table\b", 0.90, "sql_injection"),
+    (r"/etc/passwd", 0.90, "shell_injection"),
+    (r"(?i)\|\s*curl\s", 0.80, "shell_injection"),
     # Financial manipulation patterns
     (r"(?i)already\s+processed\s+refund\s+of\s+\$[\d,]+", 0.70, "false_refund_claim"),
     (r"(?i)auth(orization)?\s*(code|ref|number)?\s*:\s*AUTH-\d+", 0.60, "fake_auth_code"),
@@ -60,12 +71,12 @@ def detect_injection(
 ) -> InjectionResult:
     """
     Scan text for injection patterns.
-    
+
     Args:
         text: The text to scan (ticket body, CRM note, etc.)
         source: Where the text came from (for audit logging)
         context_sources: Other text sources to scan (CRM notes, etc.)
-    
+
     Returns:
         InjectionResult with suspected flag and confidence score.
     """
@@ -89,8 +100,8 @@ def detect_injection(
 
     confidence = min(1.0, max(0.0, total_weight - reduction))
     suspected = confidence >= 0.5 or any(
-        w >= 0.90 for _, w, l in INJECTION_PATTERNS
-        if l in matched_patterns
+        w >= 0.90 for _, w, label in INJECTION_PATTERNS
+        if label in matched_patterns
     )
 
     return InjectionResult(

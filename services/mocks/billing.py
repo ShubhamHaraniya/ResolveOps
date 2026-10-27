@@ -9,13 +9,11 @@ Key behaviors:
 - Age window: invoice > 30 days → 422
 """
 import asyncio
-import hashlib
 import os
 import random
-import time
 from datetime import datetime, UTC, timedelta
 
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel, Field
 from typing import Literal
 from seed_data import ACCOUNTS, INVOICES, SUBSCRIPTIONS

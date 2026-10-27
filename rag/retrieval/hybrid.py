@@ -3,7 +3,7 @@ Hybrid Retrieval with Reciprocal Rank Fusion (RRF) for ResolveOps.
 Fuses Qdrant dense vector candidates with BM25 lexical candidates
 to guarantee both semantic matching and exact rule/numeric retrieval.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import structlog
 
 from rag.retrieval.dense import search_dense

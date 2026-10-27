@@ -2,7 +2,6 @@
 Shared seed data for all mock backend services.
 Realistic test data with edge cases for security testing.
 """
-import uuid
 from datetime import datetime, timedelta, UTC
 
 def now():
@@ -49,6 +48,7 @@ CONTACTS = {
     # ACC-001 / Acme Corp
     "john.smith@acme-corp.com": {"id": "CON-001", "account_id": "ACC-001", "email": "john.smith@acme-corp.com", "name": "John Smith", "is_authorized": True, "role": "admin"},
     "jane.doe@acme-corp.com":   {"id": "CON-002", "account_id": "ACC-001", "email": "jane.doe@acme-corp.com",   "name": "Jane Doe",   "is_authorized": True,  "role": "billing"},
+    "jane@acme.com":            {"id": "CON-002-ALT", "account_id": "ACC-001", "email": "jane@acme.com",         "name": "Jane Acme",   "is_authorized": True,  "role": "billing"},
     # ACC-002 / Globex
     "homer.simpson@globex.com": {"id": "CON-003", "account_id": "ACC-002", "email": "homer.simpson@globex.com", "name": "Homer Simpson", "is_authorized": True, "role": "admin"},
     # ACC-003 / Initech

@@ -30,6 +30,8 @@ _idempotency_store: Dict[str, Dict[str, Any]] = {}
 _refunds: List[Dict[str, Any]] = []
 _credits: List[Dict[str, Any]] = []
 
+FAULT_INJECTION = os.environ.get("ENABLE_FAULT_INJECTION", "false").lower() == "true"
+
 # ─── Tool Definitions & Annotations ──────────────────────────────────────────
 
 TOOLS: List[Dict[str, Any]] = [
@@ -237,7 +239,8 @@ async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict
 
     elif name == "list_invoices":
         account_id = arguments.get("account_id")
-        invs = [i for i in INVOICES.values() if i.get("account_id") == account_id]
+        norm = str(account_id or "").replace("-", "").upper()
+        invs = [i for i in INVOICES.values() if str(i.get("account_id", "")).replace("-", "").upper() == norm]
         return {"account_id": account_id, "invoices": invs, "total": len(invs)}
 
     elif name == "get_subscription":
@@ -249,14 +252,18 @@ async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict
     elif name == "preview_plan_change":
         sub_id = arguments.get("subscription_id")
         target_plan = arguments.get("target_plan")
+        if not sub_id or sub_id not in SUBSCRIPTIONS:
+            return {"error": f"Subscription '{sub_id}' not found", "found": False}
+        # Mock pricing: the demo data has no price table, so amounts are fixed placeholders.
         return {
             "subscription_id": sub_id,
-            "current_plan": "Starter",
+            "current_plan": SUBSCRIPTIONS[sub_id]["plan"],
             "target_plan": target_plan,
             "proration_credit_cents": 1500,
             "new_charge_cents": 5000,
             "net_amount_due_cents": 3500,
             "currency": "USD",
+            "mock_pricing": True,
         }
 
     elif name == "issue_refund":
@@ -272,11 +279,12 @@ async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict
             cached["idempotent_replay"] = True
             return cached
 
-        # 2. Validation
-        if invoice_id not in INVOICES:
+        # 2. Validation: the invoice must exist and the amount must be positive and within the invoice total
+        if not invoice_id or invoice_id not in INVOICES:
             return {"error": f"Invoice '{invoice_id}' not found", "status": "failed"}
-
         inv = INVOICES[invoice_id]
+        if not isinstance(amount_cents, int) or amount_cents <= 0:
+            return {"error": "amount_cents must be a positive integer", "status": "failed"}
         if amount_cents > inv.get("amount_cents", 0):
             return {"error": "Refund amount exceeds invoice total", "status": "failed"}
 
@@ -294,6 +302,13 @@ async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict
 
         if key:
             _idempotency_store[key] = refund_record
+
+        # Fault injection (off by default): simulate a timeout after the commit, used to
+        # exercise read-back reconciliation. Enable with ENABLE_FAULT_INJECTION=true.
+        if FAULT_INJECTION and (arguments.get("simulate_timeout") or "timeout" in str(reason).lower()):
+            import httpx
+            log.warning("mcp_billing.simulating_timeout_after_commit", refund_id=refund_record["id"], key=key)
+            raise httpx.TimeoutException("Simulated network timeout after billing transaction committed")
 
         return refund_record
 
@@ -315,8 +330,9 @@ async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict
     elif name == "change_plan":
         sub_id = arguments.get("subscription_id")
         new_plan = arguments.get("new_plan")
-        if sub_id in SUBSCRIPTIONS:
-            SUBSCRIPTIONS[sub_id]["plan"] = new_plan
+        if sub_id not in SUBSCRIPTIONS:
+            return {"error": f"Subscription '{sub_id}' not found", "status": "failed"}
+        SUBSCRIPTIONS[sub_id]["plan"] = new_plan
         return {
             "subscription_id": sub_id,
             "new_plan": new_plan,

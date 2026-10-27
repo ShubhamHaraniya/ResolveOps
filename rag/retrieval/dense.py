@@ -8,7 +8,6 @@ from qdrant_client import QdrantClient
 
 from rag.embeddings.embedder import get_embedder
 from rag.ingestion.indexer import (
-    get_qdrant_client,
     index_all_policy_chunks,
     COLLECTION_NAME,
 )

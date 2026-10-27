@@ -1,0 +1,27 @@
+# Runtime dependencies. Lower bounds are the versions the test suite was run with.
+
+# API / config / persistence
+fastapi>=0.159
+uvicorn>=0.54
+pydantic>=2.14
+pydantic-settings>=2.16
+sqlalchemy>=2.1
+aiosqlite>=0.22      # SQLite fallback when PostgreSQL is unreachable
+asyncpg>=0.32        # PostgreSQL driver
+redis>=8.1           # readiness probe only
+httpx>=0.28
+tenacity>=9.2
+pyyaml>=6.0
+structlog>=26.1
+python-dateutil>=3.0
+python-dotenv>=1.2
+
+# Workflow / observability
+langgraph>=1.2
+langfuse>=5.0
+
+# RAG
+qdrant-client>=1.20
+flashrank>=0.2.10
+rank-bm25>=0.2.2
+fastembed>=0.3       # optional: without it a deterministic hash embedder is used (not tested here)

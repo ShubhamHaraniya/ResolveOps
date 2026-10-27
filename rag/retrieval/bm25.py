@@ -56,7 +56,7 @@ def search_bm25(query: str, top_k: int = 15) -> List[Dict[str, Any]]:
             return []
 
         doc_scores = bm25.get_scores(tokenized_query)
-        
+
         # Sort indices by score descending
         ranked_indices = sorted(
             range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True

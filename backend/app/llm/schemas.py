@@ -2,8 +2,24 @@
 LLM output schemas — Pydantic models for Groq structured outputs.
 All models use strict JSON mode (no loose fields).
 """
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 from pydantic import BaseModel, Field
+
+
+class TokenUsage(BaseModel):
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
+class LLMCallResult(BaseModel):
+    result: Any
+    usage: TokenUsage
+    latency_ms: float = 0.0
+    model: str
+    call_id: str
 
 
 class Classification(BaseModel):

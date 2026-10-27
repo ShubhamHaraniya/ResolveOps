@@ -2,8 +2,7 @@
 Tests for section-aware markdown chunker in rag/ingestion/chunker.py
 """
 from pathlib import Path
-import pytest
-from rag.ingestion.chunker import chunk_document, chunk_all_documents, PolicyChunk
+from rag.ingestion.chunker import chunk_document, chunk_all_documents
 
 
 def test_chunk_refund_policy_v3():

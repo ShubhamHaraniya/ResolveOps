@@ -1,7 +1,6 @@
 """
 ResolveOps FastAPI Application Entry Point
 """
-import time
 from contextlib import asynccontextmanager
 
 import structlog
@@ -9,13 +8,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.db.session import init_db
 from app.api.health import router as health_router
 from app.api.tickets import router as tickets_router
+from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.customers import router as customers_router
 from app.api.audit import router as audit_router
 from app.api.analytics import router as analytics_router
-from app.api.demo import router as demo_router
+from app.api.policies import router as policies_router
+from app.api.webhooks import router as webhooks_router
+from app.api.copilot import router as copilot_router
+from app.api.admin import router as admin_router
 
 log = structlog.get_logger()
 
@@ -25,11 +29,26 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     log.info("resolveops.startup", version=settings.version, env=settings.environment)
 
+    # Initialize real database tables
+    try:
+        await init_db()
+        from app.db.seed import seed_initial_data
+        await seed_initial_data(include_demo_history=settings.seed_demo_data)
+    except Exception as e:
+        log.warning("db.init_failed_in_lifespan", error=str(e))
+
+    # Persist gateway audit events into the hash-chained audit_log table
+    from app.audit.gateway_sink import flush_pending, persist_gateway_event
+    from services.gateway import gateway
+    gateway.set_audit_sink(persist_gateway_event)
+
     # Verify connectivity to dependencies
     await _verify_dependencies()
 
     yield  # App is running
 
+    await flush_pending()
+    gateway.set_audit_sink(None)
     log.info("resolveops.shutdown")
 
 
@@ -45,7 +64,7 @@ async def _verify_dependencies():
         await conn.close()
         log.info("dep.postgres", status="connected")
     except Exception:
-        log.info("dep.postgres", status="unreachable", note="Using in-memory data store for local dev")
+        log.info("dep.postgres", status="unreachable", note="Using in-memory/sqlite data store for local dev")
 
     # Redis
     try:
@@ -79,10 +98,7 @@ def create_app() -> FastAPI:
     # CORS — allow frontend
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://localhost:3001",
-        ],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -91,11 +107,15 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health_router, tags=["Health"])
     app.include_router(tickets_router, prefix="/api", tags=["Tickets"])
+    app.include_router(runs_router, prefix="/api", tags=["Runs"])
     app.include_router(approvals_router, prefix="/api", tags=["Approvals"])
     app.include_router(customers_router, prefix="/api", tags=["Customers"])
     app.include_router(audit_router, prefix="/api", tags=["Audit"])
     app.include_router(analytics_router, prefix="/api", tags=["Analytics"])
-    app.include_router(demo_router, prefix="/api", tags=["Demo"])
+    app.include_router(policies_router, prefix="/api", tags=["Policies"])
+    app.include_router(webhooks_router, prefix="/api", tags=["Webhooks"])
+    app.include_router(copilot_router, prefix="/api", tags=["Copilot"])
+    app.include_router(admin_router, prefix="/api", tags=["Admin"])
 
     @app.get("/")
     async def root():

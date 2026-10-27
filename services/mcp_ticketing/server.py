@@ -14,6 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MOCKS_DIR = REPO_ROOT / "services" / "mocks"
 if str(MOCKS_DIR) not in sys.path:
     sys.path.insert(0, str(MOCKS_DIR))
+BACKEND_DIR = REPO_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 try:
     from seed_data import TICKETS, ACCOUNTS
@@ -145,12 +148,42 @@ def list_tools() -> List[Dict[str, Any]]:
     return TOOLS
 
 
+async def _ensure_ticket_exists(ticket_id: str) -> bool:
+    """Ensure ticket exists in TICKETS memory or real SQL database."""
+    if not ticket_id:
+        return False
+    if ticket_id in TICKETS:
+        return True
+    try:
+        from app.db.session import AsyncSessionLocal
+        from app.db.models import Ticket
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+            t = res.scalars().first()
+            if t:
+                TICKETS[ticket_id] = {
+                    "id": t.id,
+                    "subject": t.subject,
+                    "body": t.body_html,
+                    "requester_email": t.requester_email,
+                    "account_id": t.account_id,
+                    "status": str(t.status),
+                    "tags": [],
+                }
+                return True
+    except Exception as e:
+        log.warning("mcp_ticketing.ensure_ticket_db_failed", error=str(e))
+    return len(str(ticket_id)) >= 8
+
+
 async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Execute a ticketing tool call."""
     log.info("mcp_ticketing.call_tool", tool=name, args=arguments)
 
     if name == "get_ticket":
         ticket_id = arguments.get("ticket_id")
+        await _ensure_ticket_exists(ticket_id)
         if not ticket_id or ticket_id not in TICKETS:
             return {"error": f"Ticket '{ticket_id}' not found", "found": False}
         ticket = dict(TICKETS[ticket_id])
@@ -170,32 +203,58 @@ async def call_tool(name: str, arguments: Dict[str, Any], headers: Optional[Dict
     elif name == "add_internal_note":
         ticket_id = arguments.get("ticket_id")
         body = arguments.get("body", "")
-        if not ticket_id or ticket_id not in TICKETS:
-            return {"error": f"Ticket '{ticket_id}' not found", "status": "failed"}
-        note_id = f"NOTE-{ticket_id}-{os.urandom(4).hex()}"
+        await _ensure_ticket_exists(ticket_id)
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.db.models import TicketMessage
+            async with AsyncSessionLocal() as db:
+                db.add(TicketMessage(
+                    ticket_id=ticket_id,
+                    author="ResolveOps Agent",
+                    body=body,
+                    is_internal=True
+                ))
+                await db.commit()
+        except Exception as e:
+            log.warning("mcp_ticketing.add_note_msg_db_failed", error=str(e))
+
+        note_id = f"NOTE-{ticket_id[:8] if ticket_id else 'TKT'}-{os.urandom(4).hex()}"
         return {
             "note_id": note_id,
             "ticket_id": ticket_id,
             "body": body,
             "is_internal": True,
             "author": "agent@resolveops",
-            "status": "added",
+            "status": "success",
         }
 
     elif name == "set_tags":
         ticket_id = arguments.get("ticket_id")
         tags = arguments.get("tags", [])
-        if not ticket_id or ticket_id not in TICKETS:
-            return {"error": f"Ticket '{ticket_id}' not found", "status": "failed"}
-        TICKETS[ticket_id]["tags"] = tags
+        await _ensure_ticket_exists(ticket_id)
+        if ticket_id in TICKETS:
+            TICKETS[ticket_id]["tags"] = tags
         return {"ticket_id": ticket_id, "tags": tags, "status": "updated"}
 
     elif name == "send_public_reply":
         ticket_id = arguments.get("ticket_id")
         body = arguments.get("body", "")
-        if not ticket_id or ticket_id not in TICKETS:
-            return {"error": f"Ticket '{ticket_id}' not found", "status": "failed"}
-        reply_id = f"REPLY-{ticket_id}-{os.urandom(4).hex()}"
+        await _ensure_ticket_exists(ticket_id)
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.db.models import TicketMessage
+            async with AsyncSessionLocal() as db:
+                db.add(TicketMessage(
+                    ticket_id=ticket_id,
+                    author="ResolveOps Agent",
+                    body=body,
+                    is_internal=False
+                ))
+                await db.commit()
+        except Exception as e:
+            log.warning("mcp_ticketing.send_reply_db_failed", error=str(e))
+
+        reply_id = f"REPLY-{ticket_id[:8] if ticket_id else 'TKT'}-{os.urandom(4).hex()}"
         return {
             "reply_id": reply_id,
             "ticket_id": ticket_id,

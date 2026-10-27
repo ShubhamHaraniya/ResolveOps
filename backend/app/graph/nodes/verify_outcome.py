@@ -3,8 +3,6 @@ verify_outcome node — read-back verification after execution.
 Handles timeout-after-commit: query billing by idempotency key to find result.
 """
 import structlog
-import httpx
-import os
 
 from app.graph.state import TicketState
 
@@ -20,8 +18,6 @@ async def verify_outcome_node(state: TicketState) -> dict:
     executed = state.get("executed", [])
     flags = list(state.get("flags", []))
 
-    billing_url = os.environ.get("MOCK_BILLING_URL", "http://localhost:8003")
-
     verified_executed = []
     for action in executed:
         if action.get("outcome") == "unknown_timeout":
@@ -29,26 +25,25 @@ async def verify_outcome_node(state: TicketState) -> dict:
             idem_key = action.get("args", {}).get("idempotency_key")
             if idem_key:
                 try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        r = await client.get(
-                            f"{billing_url}/refunds",
-                            params={"idempotency_key": idem_key}
+                    from app.reliability.readback import ReadBackVerifier, ReadBackState
+                    reconcile_res = await ReadBackVerifier.reconcile_timeout(
+                        tool=action["tool"],
+                        args=action.get("args", {}),
+                        idempotency_key=idem_key,
+                    )
+                    if reconcile_res.get("state") == ReadBackState.COMMITTED:
+                        log.info(
+                            "verify_outcome.readback_found",
+                            ticket_id=ticket_id,
+                            tool=action["tool"],
+                            refund=reconcile_res.get("result"),
                         )
-                        if r.status_code == 200:
-                            data = r.json()
-                            if data.get("found"):
-                                log.info(
-                                    "verify_outcome.readback_found",
-                                    ticket_id=ticket_id,
-                                    tool=action["tool"],
-                                    refund_id=data["refund"].get("refund_id"),
-                                )
-                                action = {**action, "result": data["refund"], "outcome": "confirmed_via_readback"}
-                                if "timeout_after_commit" in flags:
-                                    flags.remove("timeout_after_commit")
-                            else:
-                                log.info("verify_outcome.readback_not_found", ticket_id=ticket_id)
-                                action = {**action, "outcome": "not_found_after_timeout"}
+                        action = {**action, "result": reconcile_res.get("result"), "outcome": "confirmed_via_readback"}
+                        if "timeout_after_commit" in flags:
+                            flags.remove("timeout_after_commit")
+                    else:
+                        log.info("verify_outcome.readback_not_found", ticket_id=ticket_id)
+                        action = {**action, "outcome": "not_found_after_timeout"}
                 except Exception as e:
                     log.warning("verify_outcome.readback_failed", error=str(e))
 
@@ -65,18 +60,44 @@ async def draft_reply_node(state: TicketState) -> dict:
     ticket_id = state.get("ticket_id")
     executed = state.get("executed", [])
     proposal = state.get("proposal", {})
-    ticket = state.get("raw_ticket", {})
 
     if not executed:
         return {}
 
-    # Use draft from proposal as base, or generate simple summary
-    draft = proposal.get("draft_reply", "")
-    if not draft:
-        actions_summary = ", ".join(e["tool"] for e in executed if "error" not in e)
-        draft = f"We have processed your request. Actions taken: {actions_summary}. Thank you for contacting support."
+    # Check if a financial refund was actually executed
+    refund_executed = any(e.get("tool") == "billing.issue_refund" and not e.get("error") for e in executed)
 
-    log.info("node.draft_reply.done", ticket_id=ticket_id)
+    # Use draft from proposal as base
+    draft = proposal.get("draft_reply", "")
+
+    # False claim check: ONLY replace if the draft falsely claims a refund was already issued/processed
+    falsely_claims_processed = (
+        not refund_executed and draft and
+        ("has been processed" in draft.lower() or "issued a refund" in draft.lower() or "refund has been sent" in draft.lower())
+    )
+
+    if falsely_claims_processed:
+        if proposal.get("clarification_needed") and proposal.get("clarification_question"):
+            draft = (
+                f"Thank you for contacting Northwind Support. {proposal.get('clarification_question')} "
+                "Please provide this information so our billing team can assist you."
+            )
+        else:
+            draft = (
+                "Thank you for reaching out to Northwind Support. We have reviewed your request, and our support team "
+                "is currently investigating your account. Please let us know if you have any additional invoice details to share."
+            )
+    elif not draft:
+        if refund_executed:
+            draft = "Your refund request has been processed. Please allow 5-7 business days for the funds to appear on your original payment method."
+        else:
+            draft = "We have received and reviewed your request. Our support team is looking into this and will follow up shortly."
+
+    # Strip any accidental internal tool names or code symbols from the public customer response
+    for tool_name in ["ticketing.add_internal_note", "ticketing.send_public_reply", "ticketing.patch_ticket", "billing.issue_refund", "access.grant_access"]:
+        draft = draft.replace(tool_name, "internal review")
+
+    log.info("node.draft_reply.done", ticket_id=ticket_id, refund_executed=refund_executed)
     return {"proposal": {**(proposal or {}), "draft_reply": draft}}
 
 

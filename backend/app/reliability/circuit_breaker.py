@@ -9,7 +9,7 @@ States:
 """
 import time
 from enum import Enum
-from typing import Dict, Any, Callable, Coroutine
+from typing import Dict
 import structlog
 
 log = structlog.get_logger()

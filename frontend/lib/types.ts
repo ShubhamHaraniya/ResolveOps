@@ -135,45 +135,39 @@ export interface AuditEvent {
   row_hash: string;
 }
 
+/** Node entry of a workflow run, as returned by GET /api/runs. */
 export interface TraceNode {
   id: string;
   name: string;
-  status: "completed" | "interrupted" | "failed" | "skipped" | "running";
-  latency_ms: number;
-  model?: string;
+  display_name?: string;
+  status: "pending" | "running" | "completed" | "failed" | "skipped" | "paused" | string;
+  latency_ms: number | null;
   provider?: string;
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  estimated_cost?: number;
-  input_summary?: string;
-  output_summary?: string;
+  error?: string | null;
 }
 
+/** Workflow run, as returned by GET /api/runs. Nullable fields are not recorded for every run. */
 export interface TraceRun {
   run_id: string;
-  ticket_id: string;
-  ticket_number: string;
-  status: "completed" | "interrupted" | "failed";
-  started_at: string;
-  ended_at: string;
-  total_duration_ms: number;
-  total_tokens: number;
-  total_cost: number;
+  ticket_id: string | null;
+  ticket_number: string | null;
+  subject: string | null;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  total_duration_ms: number | null;
+  total_tokens: number | null;
+  total_cost: number | null;
+  llm_calls: number | null;
+  langfuse_trace_id: string | null;
+  error: string | null;
   nodes: TraceNode[];
 }
 
 export interface ServiceHealth {
   name: string;
   status: "healthy" | "degraded" | "unreachable";
-  latency_ms: number;
+  latency_ms: number | null;
   last_check: string;
 }
 
-export interface DemoScenario {
-  id: string;
-  name: string;
-  description: string;
-  expected_outcome: string;
-  badge_color: "blue" | "red" | "amber" | "emerald" | "purple";
-  ticket_id: string;
-}

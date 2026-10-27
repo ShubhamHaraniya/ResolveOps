@@ -15,11 +15,7 @@ log = structlog.get_logger()
 # Import injection scanner lazily (services/ dir)
 def _scan_for_injection(subject: str, body: str) -> dict:
     try:
-        import sys, os
-        mocks_parent = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "services", "gateway")
-        if mocks_parent not in sys.path:
-            sys.path.insert(0, mocks_parent)
-        from injection import scan_all_context
+        from services.gateway.injection import scan_all_context
         result = scan_all_context(ticket_subject=subject, ticket_body=body)
         return {
             "suspected": result.suspected,
@@ -63,7 +59,7 @@ async def classify_node(state: TicketState) -> dict:
     # Call Groq for classification
     from app.config import settings
     groq = get_groq_client()
-    
+
     try:
         call_result = await groq.complete_structured(
             model=settings.groq_model_fast,
@@ -80,6 +76,21 @@ async def classify_node(state: TicketState) -> dict:
         )
         classification = call_result.result
         cost = call_result.usage.estimated_cost_usd or 0.0
+
+        try:
+            from app.observability.langfuse_client import get_telemetry
+            get_telemetry().record_generation(
+                trace_id=state.get("langfuse_trace_id") or run_id or ticket_id,
+                name="classify",
+                model=settings.groq_model_fast,
+                prompt=f"Subject: {subject}\n\nBody: {body_text[:500]}",
+                completion=classification.model_dump_json() if hasattr(classification, "model_dump_json") else str(classification),
+                latency_ms=getattr(call_result, "latency_ms", 0.0),
+                usage={"prompt_tokens": call_result.usage.prompt_tokens, "completion_tokens": call_result.usage.completion_tokens},
+                cost_usd=cost,
+            )
+        except Exception:
+            pass
 
         # If injection detected, override human_review_required
         if injection["suspected"]:
@@ -102,18 +113,5 @@ async def classify_node(state: TicketState) -> dict:
         }
 
     except Exception as e:
-        log.error("node.classify.llm_failed", error=str(e), ticket_id=ticket_id)
-        # Fallback classification — flag for human review
-        return {
-            "classification": {
-                "category": "other",
-                "urgency": "medium",
-                "sentiment": "neutral",
-                "confidence": 0.0,
-                "human_review_required": True,
-                "brief_reason": f"Classification failed: {str(e)[:100]}",
-            },
-            "flags": flags + ["classification_failed"],
-            "total_llm_cost_usd": state.get("total_llm_cost_usd", 0.0),
-            "total_llm_calls": state.get("total_llm_calls", 0) + 1,
-        }
+        log.error("node.classify.failed", error=str(e), ticket_id=ticket_id)
+        raise

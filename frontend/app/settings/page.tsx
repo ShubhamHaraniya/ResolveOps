@@ -2,26 +2,24 @@
 
 import React, { useState } from "react";
 import {
-  Settings as SettingsIcon,
   ShieldAlert,
-  ShieldCheck,
   Server,
   Cpu,
-  Key,
   CheckCircle2,
+  AlertTriangle,
   RefreshCw,
 } from "lucide-react";
 import { useApp } from "@/lib/store";
 
 export default function SettingsPage() {
-  const { killSwitch, toggleKillSwitch, systemHealth } = useApp();
-  const [testingService, setTestingService] = useState<string | null>(null);
+  const { killSwitch, toggleKillSwitch, systemHealth, backendReachable, refresh } = useApp();
+  const [refreshing, setRefreshing] = useState(false);
+  const [killError, setKillError] = useState<string | null>(null);
 
-  const testConnectivity = (name: string) => {
-    setTestingService(name);
-    setTimeout(() => {
-      setTestingService(null);
-    }, 700);
+  const recheck = async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
   };
 
   return (
@@ -32,7 +30,7 @@ export default function SettingsPage() {
           System & Governance Settings
         </h1>
         <p className="text-xs text-slate-500 mt-0.5">
-          Configuration parameters, model bindings, and security gateway switches
+          Gateway kill switch, model defaults, and backend dependency status
         </p>
       </div>
 
@@ -52,26 +50,27 @@ export default function SettingsPage() {
                 Global Policy Gateway Kill Switch
               </h3>
               <p className="text-xs text-slate-500">
-                Instantly halt all automated agent writes and external side-effects across all backends.
+                Reject every tool execution at the policy gateway until released.
               </p>
             </div>
           </div>
 
           <button
-            onClick={() => toggleKillSwitch(!killSwitch)}
+            onClick={async () => setKillError(await toggleKillSwitch(!killSwitch))}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs ${
               killSwitch
                 ? "bg-red-600 text-white hover:bg-red-700 animate-pulse"
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
           >
-            {killSwitch ? "KILL SWITCH ENGAGED (CLICK TO RESUME)" : "STANDBY (ACTIVE)"}
+            {killSwitch ? "Kill switch ON (click to release)" : "Kill switch off (click to engage)"}
           </button>
         </div>
 
         <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
-          When active, the policy gateway short-circuits at <strong>Step 10</strong>, rejecting all outgoing tool executions with a deterministic <code>GATEWAY_HALTED</code> event in the tamper-evident audit ledger.
+          When active, the policy gateway rejects tool executions at <strong>step 10</strong> with HTTP 503. The switch is held in backend process memory: it resets on restart and is not shared across workers.
         </div>
+        {killError && <div className="text-xs text-red-600">{killError}</div>}
       </div>
 
       {/* AI Inference Section */}
@@ -79,7 +78,7 @@ export default function SettingsPage() {
         <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
           <Cpu className="w-4 h-4 text-slate-500" />
           <h3 className="text-sm font-bold text-slate-900">
-            Groq Orchestration Models
+            Groq Models (defaults)
           </h3>
         </div>
 
@@ -92,7 +91,7 @@ export default function SettingsPage() {
               openai/gpt-oss-120b
             </div>
             <p className="text-[11px] text-slate-500">
-              Used for complex multi-tool planning, RAG synthesis, and structured resolution schemas.
+              Default for action planning (<code>GROQ_MODEL_PRIMARY</code>).
             </p>
           </div>
 
@@ -104,7 +103,7 @@ export default function SettingsPage() {
               openai/gpt-oss-20b
             </div>
             <p className="text-[11px] text-slate-500">
-              Used for initial intent classification, sentiment scoring, and urgency routing.
+              Default for ticket classification (<code>GROQ_MODEL_FAST</code>).
             </p>
           </div>
         </div>
@@ -116,37 +115,37 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Server className="w-4 h-4 text-slate-500" />
             <h3 className="text-sm font-bold text-slate-900">
-              Connected Integrations & MCP Services
+              Backend Dependencies
             </h3>
           </div>
-          <span className="text-xs text-emerald-600 font-mono font-semibold">
-            All 7 Services Connected
-          </span>
+          <button
+            onClick={recheck}
+            disabled={refreshing}
+            className="px-3 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium flex items-center gap-1.5"
+          >
+            <RefreshCw className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`} />
+            <span>{refreshing ? "Checking..." : "Re-check"}</span>
+          </button>
         </div>
 
         <div className="divide-y divide-slate-100 text-xs">
+          {!backendReachable && (
+            <div className="py-3 text-amber-600">Backend unreachable.</div>
+          )}
           {systemHealth.map((svc) => (
-            <div key={svc.name} className="py-3 flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <div key={svc.name} className="py-3 flex items-center gap-3">
+              {svc.status === "healthy" ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <div>
-                  <div className="font-semibold text-slate-800">{svc.name}</div>
-                  <div className="text-[11px] text-slate-400">
-                    Ping latency: {svc.latency_ms} ms · Status: {svc.status}
-                  </div>
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+              )}
+              <div>
+                <div className="font-semibold text-slate-800">{svc.name}</div>
+                <div className="text-[11px] text-slate-400">
+                  Status: {svc.status}
+                  {svc.latency_ms !== null && ` · ${svc.latency_ms} ms`}
                 </div>
               </div>
-
-              <button
-                onClick={() => testConnectivity(svc.name)}
-                disabled={testingService === svc.name}
-                className="px-3 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-medium flex items-center gap-1.5"
-              >
-                <RefreshCw
-                  className={`w-3 h-3 ${testingService === svc.name ? "animate-spin" : ""}`}
-                />
-                <span>{testingService === svc.name ? "Pinging..." : "Test Connectivity"}</span>
-              </button>
             </div>
           ))}
         </div>

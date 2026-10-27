@@ -13,7 +13,6 @@ Priority order:
 """
 import fnmatch
 import functools
-import hashlib
 import os
 import signal
 from pathlib import Path
@@ -62,6 +61,7 @@ class PolicyContext(BaseModel):
     requester: dict[str, Any] = {}
     invoice: dict[str, Any] | None = None
     subscription: dict[str, Any] | None = None
+    flags: list[str] = []
 
 
 class PolicyEngine:
@@ -238,7 +238,25 @@ class PolicyEngine:
         elif source == "subscription" and ctx.subscription:
             return ctx.subscription.get(field)
 
+        elif source == "injection":
+            if field == "suspected":
+                flags_set = set(ctx.flags or [])
+                return bool("injection_suspected" in flags_set or "prompt_injection_suspected" in flags_set)
+
+        elif source == "flags":
+            return field in (ctx.flags or [])
+
         return None
+
+
+TIER_RANK = {"forbidden": 0, "approval": 1, "auto": 2}
+
+
+def most_restrictive(decisions: list[dict]) -> dict | None:
+    """The strictest decision in a list (forbidden > approval > auto); unknown tiers count as forbidden."""
+    if not decisions:
+        return None
+    return min(decisions, key=lambda d: TIER_RANK.get(d.get("tier"), -1))
 
 
 # Singleton engine

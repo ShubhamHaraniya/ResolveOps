@@ -1,65 +1,61 @@
-# ResolveOps — Operational Runbook
+# Runbook
 
-> Audience: Site Reliability Engineers, Support Leads, and Security Incident Responders
+Operational procedures for a running ResolveOps backend. Commands assume the repository root as working directory
+and an activated Python 3.12 environment with `requirements.txt` installed.
 
----
-
-## 1. Emergency Kill Switch Activation
-
-When anomalous agent behavior, novel adversarial attacks, or external backend outages occur:
-
-1. **Via Web Dashboard:**
-   - Click the **Kill Switch (Standby)** button in the top navigation.
-   - Confirm the modal prompt: "Confirm Emergency Halt".
-   - The status banner will turn red across all client sessions.
-2. **Via Backend CLI:**
-   ```bash
-   python -c "from app.reliability.kill_switch import set_kill_switch; set_kill_switch(True)"
-   ```
-3. **Verification:**
-   - All subsequent outgoing tool calls will immediately abort at Gateway Step 10 with a `GATEWAY_HALTED` audit log entry.
-   - Read-only actions continue to be served if permitted.
-
----
-
-## 2. Reconciling Unknown Write Outcomes
-
-If a network timeout occurs during a write to the Billing or CRM MCP service:
-
-1. Locate the `run_id` and `ticket_id` from the Alert in `/audit`.
-2. Retrieve the `Idempotency-Key` associated with the request:
-   ```bash
-   python -c "from app.audit.ledger import get_events_for_ticket; print(get_events_for_ticket('TICK-105'))"
-   ```
-3. Execute read-back verification against the billing ledger:
-   ```bash
-   python -c "from app.reliability.readback import verify_charge_status; print(verify_charge_status('idem-hash-123'))"
-   ```
-4. If the write succeeded, confirm the state match; if it failed, re-submit through the standard gateway pipeline.
-
----
-
-## 3. Deploying Policy Rule Updates
-
-1. Edit `policy/rules.yaml`.
-2. Run the policy regression test suite:
-   ```bash
-   python -m pytest tests/policy/ -v
-   ```
-3. Run the evaluation scenario safety gate:
-   ```bash
-   python -m evals.runner
-   ```
-4. Verify that `unsafe_action_rate == 0.0%` and `duplicate_side_effect_rate == 0.0%`.
-5. Deploy changes to production.
-
----
-
-## 4. Verifying Audit Ledger Integrity
-
-To ensure that the append-only audit trail has not been modified or truncated:
+## Start and check
 
 ```bash
-python -c "from app.audit.ledger import verify_hash_chain; print(verify_hash_chain())"
+uvicorn app.main:app --app-dir backend --port 8000     # add --reload for development
+curl localhost:8000/health        # liveness
+curl localhost:8000/ready         # database / redis / qdrant status (redis and qdrant are optional)
 ```
-*Expected Output:* `{"status": "VALID", "records_verified": 482, "tamper_detected": false}`
+
+Interactive API docs are served by FastAPI at `/docs`.
+
+## Kill switch
+
+Halts every gateway tool call (gateway step 10). Read the state, turn it on, turn it off:
+
+```bash
+curl localhost:8000/api/admin/kill-switch
+curl -X POST localhost:8000/api/admin/kill-switch -H 'content-type: application/json' -d '{"active": true}'
+curl -X POST localhost:8000/api/admin/kill-switch -H 'content-type: application/json' -d '{"active": false}'
+```
+
+The Settings page in the frontend has the same toggle and a banner is shown while it is active.
+The state is in process memory: it applies to one backend process and resets on restart. The endpoint is
+unauthenticated — do not expose the API publicly.
+
+## Verify the audit chain
+
+```bash
+curl localhost:8000/api/audit/verify
+```
+
+Returns `valid`, event counts and the head hash. Use `GET /api/audit/tickets/{ticket_id}` for one ticket's events and
+`GET /api/audit/export/{ticket_id}` for an export.
+
+## Unknown write outcome (timeout)
+
+If a write times out, the gateway tries a read-back. If it answers 502 "manual reconciliation required", check the
+billing/CRM system for the operation using the idempotency key recorded in the audit events for the ticket
+(`/api/audit/tickets/{ticket_id}`), then resolve the ticket manually. The workflow does not retry on its own.
+
+## Changing policy rules
+
+1. Edit `policy/rules.yaml` (or point `POLICY_FILE` at another file).
+2. `python -m pytest tests/policy tests/evals -q`
+3. `python -m evals.runner --no-write` — fails if a scenario resolves to a different tier than declared.
+4. Restart the backend.
+
+## Policy documents
+
+`GET/POST/PUT /api/policies` manage the Markdown files in `rag/documents/`; `POST /api/policies/reindex` rebuilds the
+index. These documents are informational context — editing them does not change what is allowed.
+
+## Database
+
+Tables are created at startup. There are no migrations: schema changes to existing databases need manual handling or
+deleting the local SQLite file (`backend/resolveops.db`) in development. Set `SEED_DEMO_DATA=true` to also insert
+synthetic sample tickets and audit history.

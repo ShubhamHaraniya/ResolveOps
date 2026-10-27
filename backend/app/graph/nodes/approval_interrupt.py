@@ -4,7 +4,6 @@ The workflow resumes when the human reviewer POSTs to /api/approvals/{id}/approv
 """
 import hashlib
 import json
-import time
 import uuid
 from datetime import datetime, UTC, timedelta
 import structlog
@@ -32,7 +31,7 @@ async def approval_interrupt_node(state: TicketState) -> dict:
     """
     Create approval record and interrupt workflow.
     Workflow will resume when reviewer approves/rejects.
-    
+
     Approval record stored in DB (stub: returned in state for M2).
     The LangGraph interrupt mechanism suspends execution here.
     """
@@ -63,7 +62,7 @@ async def approval_interrupt_node(state: TicketState) -> dict:
         args = action.get("args", action.get("arguments", {}))
         args_hash = _make_args_hash(tool, args)
 
-        approval_id = str(uuid.uuid4())[:12]
+        approval_id = str(uuid.uuid4())
         expires_at = (datetime.now(UTC) + timedelta(hours=24)).timestamp()
 
         record = {
@@ -73,7 +72,7 @@ async def approval_interrupt_node(state: TicketState) -> dict:
             "tool": tool,
             "args_hash": args_hash,
             "args_redacted": _redact_args(args),
-            "args_full": args,  # Full args stored securely in DB (never sent to frontend)
+            "args_full": args,  # Full args; the API only ever returns args_redacted
             "policy_rule": decision.get("rule_id"),
             "approver_role": decision.get("approver_role"),
             "status": "pending",
@@ -90,6 +89,12 @@ async def approval_interrupt_node(state: TicketState) -> dict:
 
     # Primary approval (first one)
     primary = approval_records[0]
+
+    try:
+        from services.gateway.gateway import register_approval_record
+        register_approval_record(primary)
+    except Exception as e:
+        log.warning("node.approval_interrupt.register_gw_error", error=str(e))
 
     log.info(
         "node.approval_interrupt.created",

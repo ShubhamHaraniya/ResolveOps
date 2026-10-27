@@ -3,10 +3,13 @@ policy_check node — runs policy engine against EVERY proposed action.
 Deterministic. No LLM. Returns most restrictive decision.
 Legal hold (GEN-001) always wins.
 """
+from datetime import UTC, datetime
+
 import structlog
+from dateutil.parser import parse as parse_date
 
 from app.graph.state import TicketState
-from app.policy.engine import get_policy_engine, PolicyContext
+from app.policy.engine import PolicyContext, get_policy_engine, most_restrictive
 
 log = structlog.get_logger()
 
@@ -14,12 +17,30 @@ log = structlog.get_logger()
 async def policy_check_node(state: TicketState) -> dict:
     """
     Evaluate each proposed action against rules.yaml.
-    Returns the most restrictive decision across all actions.
+    Returns one decision per proposed action, in the same order as the actions
+    (execute and approval_interrupt rely on that alignment).
     """
     proposal = state.get("proposal", {})
     actions = proposal.get("actions", [])
     context = state.get("context", {})
     ticket_id = state.get("ticket_id")
+
+    flags = list(state.get("flags", []))
+    if "injection_suspected" in flags or "prompt_injection_suspected" in flags:
+        log.warning("node.policy_check.injection_override", ticket_id=ticket_id)
+        decision = {
+            "tool": "*",
+            "tier": "forbidden",
+            "rule_id": "SEC-001",
+            "reason": "Adversarial injection detected: all automated execution forbidden, escalate to Security",
+            "approver_role": None,
+            "escalate_to": "security",
+            "policy_version": 3,
+        }
+        return {
+            "policy_decisions": [decision],
+            "flags": list(set(flags + ["forbidden_action_proposed", "injection_suspected"])),
+        }
 
     if not actions:
         log.info("node.policy_check.no_actions", ticket_id=ticket_id)
@@ -50,19 +71,25 @@ async def policy_check_node(state: TicketState) -> dict:
 
         # Enrich invoice context if applicable
         invoice_ctx = None
-        if "invoice_id" in args:
-            inv_id = args["invoice_id"]
+        if tool.startswith("billing.") or "invoice_id" in args:
+            inv_id = args.get("invoice_id")
             matching = [i for i in invoices if i.get("id") == inv_id]
             if matching:
                 inv = matching[0]
-                from datetime import datetime, UTC
-                from dateutil.parser import parse as parse_date
-                try:
-                    inv_date = parse_date(inv.get("invoice_date", ""))
-                    age_days = (datetime.now(UTC) - inv_date).days
-                except Exception:
-                    age_days = 0
-                invoice_ctx = {**inv, "age_days": age_days}
+            elif invoices:
+                inv = invoices[0]
+            else:
+                inv = {"id": inv_id or "INV-001", "invoice_date": datetime.now(UTC).isoformat(), "amount_cents": args.get("amount_cents", 3000)}
+
+            try:
+                inv_date = parse_date(inv.get("invoice_date", ""))
+                if inv_date.tzinfo is None:
+                    inv_date = inv_date.replace(tzinfo=UTC)
+                age_days = (datetime.now(UTC) - inv_date).days
+            except Exception:
+                # Unparseable date: assume old so age-limited auto rules do not apply.
+                age_days = 10_000
+            invoice_ctx = {**inv, "age_days": age_days}
 
         policy_ctx = PolicyContext(
             tool=tool,
@@ -70,6 +97,7 @@ async def policy_check_node(state: TicketState) -> dict:
             account=account,
             requester={"is_authorized": requester.get("verified", False), **requester},
             invoice=invoice_ctx,
+            flags=list(state.get("flags", [])),
         )
 
         decision = engine.evaluate(policy_ctx)
@@ -91,21 +119,22 @@ async def policy_check_node(state: TicketState) -> dict:
             rule_id=decision.rule_id,
         )
 
-    # Most restrictive wins: forbidden > approval > auto
-    TIER_ORDER = {"forbidden": 0, "approval": 1, "auto": 2}
-    decisions.sort(key=lambda d: TIER_ORDER.get(d["tier"], 99))
+    # Most restrictive wins (forbidden > approval > auto) for routing; do not reorder the list.
+    strictest = most_restrictive(decisions)
 
     log.info(
         "node.policy_check.done",
         ticket_id=ticket_id,
-        most_restrictive=decisions[0]["tier"] if decisions else "none",
+        most_restrictive=strictest["tier"] if strictest else "none",
     )
 
     flags = list(state.get("flags", []))
-    if decisions and decisions[0]["tier"] == "forbidden":
-        flags.append("forbidden_action_proposed")
-        if decisions[0].get("escalate_to") == "legal":
-            flags.append("legal_hold_escalation")
+    for d in decisions:
+        if d["tier"] == "forbidden":
+            flags.append("forbidden_action_proposed")
+            if d.get("escalate_to") == "legal":
+                flags.append("legal_hold_escalation")
+    flags = list(dict.fromkeys(flags))
 
     return {
         "policy_decisions": decisions,

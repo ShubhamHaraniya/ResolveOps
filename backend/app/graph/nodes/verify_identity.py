@@ -11,6 +11,10 @@ from app.llm.schemas import IdentityResult
 log = structlog.get_logger()
 
 
+def _norm_id(v: str | None) -> str:
+    return str(v or "").replace("-", "").strip().upper()
+
+
 async def verify_identity_node(state: TicketState) -> dict:
     """
     Deterministic identity verification:
@@ -23,7 +27,6 @@ async def verify_identity_node(state: TicketState) -> dict:
     """
     ticket = state.get("raw_ticket", {})
     ticket_id = state.get("ticket_id")
-    run_id = state.get("run_id")
 
     requester_email = ticket.get("requester_email", "")
     account_id = ticket.get("account_id", "")
@@ -54,6 +57,8 @@ async def verify_identity_node(state: TicketState) -> dict:
             elif contact_resp.status_code == 200:
                 contact = contact_resp.json()
                 contact_account_id = contact.get("account_id")
+                if not account_id and contact_account_id:
+                    account_id = contact_account_id
 
                 if not contact.get("is_authorized", False):
                     identity = IdentityResult(
@@ -65,7 +70,7 @@ async def verify_identity_node(state: TicketState) -> dict:
                         requester_email=requester_email,
                         account_id=contact_account_id,
                     )
-                elif contact_account_id != account_id:
+                elif account_id and _norm_id(contact_account_id) != _norm_id(account_id):
                     # Contact exists but is linked to a DIFFERENT account
                     identity = IdentityResult(
                         verified=False,
@@ -83,10 +88,10 @@ async def verify_identity_node(state: TicketState) -> dict:
                         verified=True,
                         method="crm_authorized_contact",
                         confidence=1.0,
-                        reason=f"'{requester_email}' is an authorized contact for account '{account_id}'",
+                        reason=f"'{requester_email}' is an authorized contact for account '{account_id or contact_account_id}'",
                         authorized_contact_match=True,
                         requester_email=requester_email,
-                        account_id=account_id,
+                        account_id=account_id or contact_account_id,
                     )
             else:
                 # CRM error — fail safe
@@ -101,17 +106,55 @@ async def verify_identity_node(state: TicketState) -> dict:
                 )
 
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        log.warning("node.verify_identity.crm_unavailable", error=str(e))
-        # Fail safe: if CRM is down, treat as unverified
-        identity = IdentityResult(
-            verified=False,
-            method="crm_unavailable",
-            confidence=0.0,
-            reason=f"CRM unavailable: {str(e)[:100]}. Defaulting to unverified.",
-            authorized_contact_match=False,
-            requester_email=requester_email,
-            account_id=None,
-        )
+        log.warning("node.verify_identity.crm_http_unavailable_using_mcp", error=str(e))
+        from services import mcp_registry
+        contact = await mcp_registry.dispatch_tool("crm.find_contact", {"email": requester_email})
+
+        if not contact or contact.get("found") is False or "error" in contact:
+            identity = IdentityResult(
+                verified=False,
+                method="crm_lookup",
+                confidence=1.0,
+                reason=f"Requester '{requester_email}' not found in CRM",
+                authorized_contact_match=False,
+                requester_email=requester_email,
+                account_id=None,
+            )
+        else:
+            contact_account_id = contact.get("account_id")
+            if not account_id and contact_account_id:
+                account_id = contact_account_id
+
+            if not contact.get("is_authorized", False):
+                identity = IdentityResult(
+                    verified=False,
+                    method="crm_lookup",
+                    confidence=1.0,
+                    reason=f"'{requester_email}' is not an authorized contact",
+                    authorized_contact_match=False,
+                    requester_email=requester_email,
+                    account_id=contact_account_id,
+                )
+            elif account_id and _norm_id(contact_account_id) != _norm_id(account_id):
+                identity = IdentityResult(
+                    verified=False,
+                    method="crm_lookup",
+                    confidence=1.0,
+                    reason=f"'{requester_email}' is authorized for account '{contact_account_id}', not '{account_id}'",
+                    authorized_contact_match=False,
+                    requester_email=requester_email,
+                    account_id=contact_account_id,
+                )
+            else:
+                identity = IdentityResult(
+                    verified=True,
+                    method="crm_authorized_contact",
+                    confidence=1.0,
+                    reason=f"'{requester_email}' is an authorized contact for account '{account_id or contact_account_id}'",
+                    authorized_contact_match=True,
+                    requester_email=requester_email,
+                    account_id=account_id or contact_account_id,
+                )
 
     flags = list(state.get("flags", []))
     if not identity.verified:

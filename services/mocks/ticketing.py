@@ -4,7 +4,6 @@ Serves realistic ticket data including HTML, forwarded emails, and injection tes
 """
 import os
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from seed_data import TICKETS, ACCOUNTS
 

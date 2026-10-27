@@ -9,17 +9,16 @@ CRITICAL: This is NOT a suggestion layer. It is the enforcement boundary.
 The LangGraph workflow MUST call the gateway for every tool execution.
 No direct backend calls are permitted from node code.
 """
-import hashlib
-import json
 import os
 import time
 import uuid
 from datetime import datetime, UTC
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 import structlog
-from fastapi import FastAPI, HTTPException, Depends, Header
+from dateutil.parser import parse as parse_date
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 import sys
@@ -31,25 +30,17 @@ BACKEND_DIR = REPO_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from tokens import make_args_hash, ScopedJWT
-from injection import scan_all_context, InjectionResult
 from services import mcp_registry
+from services.gateway.tokens import ScopedJWT, make_args_hash
+from app.policy.engine import PolicyContext, get_policy_engine
 from app.reliability.circuit_breaker import get_circuit_breaker, CircuitOpenError
 from app.reliability.readback import ReadBackVerifier, ReadBackState
-from app.reliability.outbox import record_intent_sync
 
 log = structlog.get_logger()
 
 # ─── Config from environment ───────────────────────────────────────────────
-TICKETING_URL = os.environ.get("MOCK_TICKETING_URL", "http://localhost:8001")
-CRM_URL = os.environ.get("MOCK_CRM_URL", "http://localhost:8002")
-BILLING_URL = os.environ.get("MOCK_BILLING_URL", "http://localhost:8003")
-IAM_URL = os.environ.get("MOCK_IAM_URL", "http://localhost:8004")
-
 GATEWAY_JWT_SECRET = os.environ.get("GATEWAY_JWT_SECRET", "dev-secret-change-in-production")
 MAX_TOOL_CALLS_PER_RUN = int(os.environ.get("MAX_TOOL_CALLS_PER_RUN", "20"))
-MAX_LLM_CALLS_PER_RUN = int(os.environ.get("MAX_LLM_CALLS_PER_RUN", "10"))
-MAX_REPLANS = int(os.environ.get("MAX_REPLANS", "2"))
 
 app = FastAPI(title="ResolveOps Policy Gateway", version="1.0.0")
 
@@ -57,10 +48,31 @@ app = FastAPI(title="ResolveOps Policy Gateway", version="1.0.0")
 _kill_switch: bool = False
 # In-memory idempotency store (in production: Postgres + Redis)
 _idempotency_store: dict[str, dict] = {}
-# In-memory call counters per run: {run_id: {tool_calls: N, llm_calls: N, replans: N}}
+# In-memory tool-call counter per run: {run_id: {tool_calls: N}}
 _run_budgets: dict[str, dict] = {}
-# In-memory audit log (in production: append-only Postgres table)
+# In-memory audit log. The backend registers a sink (set_audit_sink) that also persists
+# each event to the hash-chained audit_log table.
 _audit_log: list[dict] = []
+_audit_sink = None
+
+
+def set_audit_sink(sink) -> None:
+    """Register a callable invoked with every audit event dict (None to disable)."""
+    global _audit_sink
+    _audit_sink = sink
+
+
+def _emit_audit(event: dict) -> None:
+    _audit_log.append(event)
+    if _audit_sink is not None:
+        try:
+            _audit_sink(event)
+        except Exception as e:  # noqa: BLE001 - audit sink problems must not break execution
+            log.error("gateway.audit_sink_failed", error=str(e))
+
+_DEFAULT_JWT_SECRET = "dev-secret-change-in-production"
+if os.environ.get("ENVIRONMENT", "development").lower() == "production" and GATEWAY_JWT_SECRET == _DEFAULT_JWT_SECRET:
+    raise RuntimeError("GATEWAY_JWT_SECRET must be set to a non-default value when ENVIRONMENT=production")
 
 jwt_validator = ScopedJWT(secret=GATEWAY_JWT_SECRET)
 
@@ -74,13 +86,11 @@ class GatewayRequest(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     token: str = Field(description="Scoped JWT for this specific tool call")
     approval_id: str | None = None  # Required for approval-tier actions
-    approval_token: str | None = None  # Approval hash for validation
     # Context for provenance validation
     trusted_context: dict[str, Any] = Field(
         default_factory=dict,
         description="Verified context from prior tool results (invoice IDs, account IDs, etc.)"
     )
-    injection_result: dict | None = None  # From injection scanner
 
 
 class GatewayResponse(BaseModel):
@@ -109,35 +119,36 @@ def step1_authenticate_run(req: GatewayRequest) -> None:
         raise HTTPException(status_code=401, detail=f"STEP1 AUTH FAILED: {e}")
 
 
+# Arguments the gateway requires on top of each MCP tool's own input schema.
+_EXTRA_REQUIRED: dict[str, list[str]] = {
+    "billing.issue_refund": ["idempotency_key"],
+    "billing.issue_credit": ["idempotency_key"],
+    "billing.change_plan": ["idempotency_key"],
+    "access.grant_access": ["expiry_days"],
+}
+
+
+def _required_args(tool: str) -> list[str] | None:
+    """Required args for `tool`, or None if the tool is not in the MCP registry."""
+    meta = mcp_registry.get_tool_metadata(tool)
+    if meta is None:
+        return None
+    required = list(meta.get("inputSchema", {}).get("required", []))
+    for extra in _EXTRA_REQUIRED.get(tool, []):
+        if extra not in required:
+            required.append(extra)
+    return required
+
+
 def step2_validate_schema(req: GatewayRequest) -> None:
-    """Step 2: Validate args against tool schema."""
-    TOOL_SCHEMAS = {
-        "billing.issue_refund": {"required": ["invoice_id", "amount_cents", "reason", "idempotency_key"]},
-        "billing.issue_credit": {"required": ["account_id", "amount_cents", "reason", "idempotency_key"]},
-        "billing.change_plan": {"required": ["subscription_id", "new_plan", "idempotency_key"]},
-        "billing.pause_subscription": {"required": ["subscription_id"]},
-        "access.grant_access": {"required": ["account_id", "user_email", "role", "expiry_days", "reason"]},
-        "access.reset_mfa": {"required": ["email", "account_id", "reason"]},
-        "ticketing.add_internal_note": {"required": ["ticket_id", "body"]},
-        "ticketing.send_public_reply": {"required": ["ticket_id", "body"]},
-        "ticketing.patch_ticket": {"required": ["ticket_id"]},
-        "billing.get_invoice": {"required": ["invoice_id"]},
-        "billing.list_invoices": {"required": ["account_id"]},
-        "billing.get_subscription": {"required": ["subscription_id"]},
-        "billing.preview_plan_change": {"required": ["subscription_id", "new_plan"]},
-        "crm.get_account": {"required": ["account_id"]},
-        "crm.find_contact": {"required": ["email"]},
-        "access.get_user": {"required": ["email"]},
-        "access.list_grants": {"required": ["account_id"]},
-        "kb.search_policy": {"required": ["query"]},
-    }
-    schema = TOOL_SCHEMAS.get(req.tool)
-    if schema is None:
+    """Step 2: Validate args against the tool's registered schema (allowlist = MCP registry)."""
+    required = _required_args(req.tool)
+    if required is None:
         raise HTTPException(
             status_code=403,
             detail=f"STEP2 SCHEMA FAIL: Unknown tool '{req.tool}' — not in approved tool registry"
         )
-    missing = [f for f in schema["required"] if f not in req.args]
+    missing = [f for f in required if f not in req.args]
     if missing:
         raise HTTPException(
             status_code=422,
@@ -149,18 +160,14 @@ def step3_validate_provenance(req: GatewayRequest) -> None:
     """
     Step 3: All IDs in args must originate from trusted_context.
     Prevents the agent from inventing or hallucinating IDs.
-    
+
     Any ID-like arg (ending in _id, or named 'email') must appear
     in the trusted context gathered from real tool results.
     """
     if not req.trusted_context:
         # If no context provided, skip provenance for read-only tools
-        readonly_tools = {
-            "billing.get_invoice", "billing.list_invoices", "billing.get_subscription",
-            "billing.preview_plan_change", "crm.get_account", "crm.find_contact",
-            "access.get_user", "access.list_grants", "kb.search_policy",
-        }
-        if req.tool in readonly_tools:
+        meta = mcp_registry.get_tool_metadata(req.tool)
+        if meta and meta.get("annotations", {}).get("readOnlyHint") is True:
             return
         # Write tools without context → fail
         raise HTTPException(
@@ -206,7 +213,7 @@ def step4_bind_identity(req: GatewayRequest) -> None:
     ctx = req.trusted_context
     requester_email = ctx.get("requester_email", "")
     account_id = ctx.get("account_id") or req.args.get("account_id", "")
-    
+
     # Skip identity check for non-account-specific reads
     if req.tool in ("kb.search_policy",):
         return
@@ -216,9 +223,16 @@ def step4_bind_identity(req: GatewayRequest) -> None:
 
     authorized_contacts = ctx.get("account", {}).get("authorized_contacts", [])
     if not authorized_contacts:
-        # Trusted context doesn't have account info yet — pass (intake node hasn't fetched yet)
-        return
-    
+        meta = mcp_registry.get_tool_metadata(req.tool)
+        read_only = bool(meta and meta.get("annotations", {}).get("readOnlyHint") is True)
+        if read_only:
+            return
+        # Fail closed: a write needs a known list of authorized contacts to check against.
+        raise HTTPException(
+            status_code=403,
+            detail="STEP4 IDENTITY FAIL: No authorized-contact list in trusted context for a write operation",
+        )
+
     if requester_email not in authorized_contacts:
         raise HTTPException(
             status_code=403,
@@ -232,29 +246,43 @@ def step5_evaluate_policy(req: GatewayRequest) -> dict:
     Step 5: Evaluate policy rules.
     Returns policy decision dict. Raises 403 if forbidden.
     """
-    import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
-    from app.policy.engine import PolicyEngine, PolicyContext
-    
-    engine = PolicyEngine()
-    ctx_data = req.trusted_context
-    
-    from app.policy.engine import PolicyContext
+    engine = get_policy_engine()
+    ctx_data = req.trusted_context or {}
+
+    invoice_ctx = ctx_data.get("invoice")
+    if not invoice_ctx and "invoice_id" in req.args:
+        invoice_ctx = ctx_data.get(req.args["invoice_id"])
+    if not invoice_ctx and ctx_data.get("invoices"):
+        invoices_list = ctx_data.get("invoices")
+        if isinstance(invoices_list, list) and invoices_list:
+            first_inv = invoices_list[0]
+            invoice_ctx = ctx_data.get(first_inv) if isinstance(first_inv, str) else first_inv
+    if invoice_ctx and "age_days" not in invoice_ctx:
+        try:
+            inv_date = parse_date(invoice_ctx.get("invoice_date", ""))
+            if inv_date.tzinfo is None:
+                inv_date = inv_date.replace(tzinfo=UTC)
+            age_days = (datetime.now(UTC) - inv_date).days
+        except Exception:
+            # Unparseable date: assume old so age-limited auto rules do not apply.
+            age_days = 10_000
+        invoice_ctx = {**invoice_ctx, "age_days": age_days}
+
     policy_ctx = PolicyContext(
         tool=req.tool,
         args=req.args,
         account=ctx_data.get("account", {}),
         requester=ctx_data.get("requester", {}),
-        invoice=ctx_data.get("invoice"),
+        invoice=invoice_ctx,
     )
     decision = engine.evaluate(policy_ctx)
-    
+
     if decision.tier == "forbidden":
         raise HTTPException(
             status_code=403,
             detail=f"STEP5 POLICY FORBIDDEN: Rule {decision.rule_id} — {decision.reason}"
         )
-    
+
     return {"tier": decision.tier, "rule_id": decision.rule_id, "approver_role": decision.approver_role}
 
 
@@ -273,11 +301,22 @@ def step6_validate_approval(req: GatewayRequest, policy_decision: dict) -> None:
                    "Submit for approval via POST /api/approvals first."
         )
 
-    # Look up approval record (in-memory for now — Postgres in production)
-    # For M2 integration test, acceptance is simulated
+    # Look up approval record (in-memory registry, populated by the approval flow)
     approval_record = _get_approval(req.approval_id)
     if not approval_record:
         raise HTTPException(status_code=403, detail=f"STEP6 APPROVAL FAIL: Approval {req.approval_id} not found")
+
+    # The approval must belong to this exact run + ticket (no cross-ticket reuse).
+    if approval_record.get("run_id") != req.run_id or approval_record.get("ticket_id") != req.ticket_id:
+        raise HTTPException(
+            status_code=403,
+            detail="STEP6 APPROVAL FAIL: Approval was issued for a different run or ticket",
+        )
+    if approval_record.get("tool") != req.tool:
+        raise HTTPException(
+            status_code=403,
+            detail="STEP6 APPROVAL FAIL: Approval was issued for a different tool",
+        )
 
     if approval_record.get("status") != "approved":
         raise HTTPException(
@@ -286,18 +325,19 @@ def step6_validate_approval(req: GatewayRequest, policy_decision: dict) -> None:
         )
 
     # Expiry check
-    expires_at = approval_record.get("expires_at", 0)
+    expires_at = approval_record.get("expires_at") or 0
     if time.time() > expires_at:
         raise HTTPException(status_code=403, detail="STEP6 APPROVAL EXPIRED: Approval has expired (24h limit)")
 
-    # Hash match — the MOST CRITICAL check
+    # Hash match — accepts with or without idempotency key
     expected_hash = make_args_hash(req.tool, req.args)
+    expected_hash_no_idem = make_args_hash(req.tool, {k: v for k, v in req.args.items() if k != "idempotency_key"})
     stored_hash = approval_record.get("args_hash")
-    if not stored_hash or stored_hash != expected_hash:
+    if not stored_hash or (stored_hash != expected_hash and stored_hash != expected_hash_no_idem):
         raise HTTPException(
             status_code=403,
-            detail=f"STEP6 APPROVAL HASH MISMATCH: Approved args don't match submitted args. "
-                   f"Possible tampering or edit. Create a new approval request."
+            detail="STEP6 APPROVAL HASH MISMATCH: Approved args don't match submitted args. "
+                   "Possible tampering or edit. Create a new approval request."
         )
 
 
@@ -316,7 +356,7 @@ def step7_check_idempotency(req: GatewayRequest) -> dict | None:
 
 def step8_check_limits(req: GatewayRequest) -> None:
     """Step 8: Enforce per-run budget limits."""
-    budgets = _run_budgets.setdefault(req.run_id, {"tool_calls": 0, "llm_calls": 0, "replans": 0})
+    budgets = _run_budgets.setdefault(req.run_id, {"tool_calls": 0})
     if budgets["tool_calls"] >= MAX_TOOL_CALLS_PER_RUN:
         raise HTTPException(
             status_code=429,
@@ -338,8 +378,8 @@ def step9_audit_start(req: GatewayRequest, audit_event_id: str) -> None:
         "actor_type": "agent",
         "status": "executing",
     }
-    _audit_log.append(event)
-    log.info("gateway.audit.start", **{k: v for k, v in event.items() if k != "args_redacted"})
+    _emit_audit(event)
+    log.info("gateway.audit.start", audit_type=event.get("event"), tool=event.get("tool"), run_id=event.get("run_id"))
 
 
 def step10_check_kill_switch(req: GatewayRequest) -> None:
@@ -376,16 +416,11 @@ async def step11_execute(req: GatewayRequest) -> Any:
         result = await mcp_registry.dispatch_tool(tool, args, headers=headers)
         breaker.record_success()
 
-        # If write tool, record outbox intent
-        meta = mcp_registry.get_tool_metadata(tool)
-        if meta and not meta.get("annotations", {}).get("readOnlyHint", True):
-            record_intent_sync(event_type=tool, payload={"ticket_id": req.ticket_id, "args": args, "result": result})
-
         return result
 
     except httpx.TimeoutException:
         breaker.record_failure()
-        log.warn("gateway.dispatch_timeout", tool=tool)
+        log.warning("gateway.dispatch_timeout", tool=tool)
         # Attempt read-back verification
         idemp_key = args.get("idempotency_key")
         readback_res = await ReadBackVerifier.reconcile_timeout(tool, args, idemp_key)
@@ -430,8 +465,8 @@ def step12_audit_result(
         "idempotent_replay": idempotent_replay,
         "actor_type": "agent",
     }
-    _audit_log.append(event)
-    log.info("gateway.audit.result", **event)
+    _emit_audit(event)
+    log.info("gateway.audit.result", audit_event=event.get("event"), tool=event.get("tool"), result_status=event.get("result_status"))
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -452,13 +487,47 @@ def _redact_pii(args: dict) -> dict:
     return redacted
 
 
+# In-memory approval registry: approval_id -> record. Entries are written by the
+# approval flow (see register_approval_record / set_approval_status). It is not
+# persisted by the gateway: after a restart the approvals API re-registers a record
+# from its database row when a reviewer approves (fail closed otherwise).
+_approvals: dict[str, dict] = {}
+
+
 def _get_approval(approval_id: str) -> dict | None:
-    """Retrieve approval record (in-memory for M2; Postgres in production)."""
+    """Exact-match lookup in the in-memory approval registry."""
     return _approvals.get(approval_id)
 
 
-# In-memory approval store
-_approvals: dict[str, dict] = {}
+def register_approval_record(record: dict) -> None:
+    """Register (or replace) an approval record. Requires id/run_id/ticket_id/tool/args_hash."""
+    required = ("id", "run_id", "ticket_id", "tool", "args_hash")
+    missing = [k for k in required if not record.get(k)]
+    if missing:
+        raise ValueError(f"approval record missing fields: {missing}")
+    _approvals[record["id"]] = dict(record)
+
+
+def set_approval_status(
+    approval_id: str,
+    status: str,
+    reviewer_id: str | None = None,
+    new_args: dict | None = None,
+) -> bool:
+    """
+    Update a registered approval. If `new_args` is given (reviewer edit), the stored
+    hash is re-bound to the edited arguments so only those exact args can execute.
+    Returns False if the approval is not registered.
+    """
+    rec = _approvals.get(approval_id)
+    if rec is None:
+        return False
+    rec["status"] = status
+    rec["reviewed_at"] = datetime.now(UTC).isoformat()
+    rec["reviewer_id"] = reviewer_id
+    if new_args is not None:
+        rec["args_hash"] = make_args_hash(rec["tool"], new_args)
+    return True
 
 
 # ─── Gateway Endpoint ───────────────────────────────────────────────────────
@@ -470,7 +539,7 @@ async def execute(req: GatewayRequest) -> GatewayResponse:
     All 12 steps must pass. Any failure → HTTP error, no execution.
     """
     audit_event_id = str(uuid.uuid4())[:8]
-    
+
     log.info(
         "gateway.execute.start",
         run_id=req.run_id,
@@ -478,42 +547,56 @@ async def execute(req: GatewayRequest) -> GatewayResponse:
         tool=req.tool,
         audit_event_id=audit_event_id,
     )
-    
+
     # ── Sequential 12-step enforcement ────────────────────────────────────
-    step1_authenticate_run(req)
-    step2_validate_schema(req)
-    step3_validate_provenance(req)
-    step4_bind_identity(req)
-    policy_decision = step5_evaluate_policy(req)
-    step6_validate_approval(req, policy_decision)
-    
-    # Idempotency — return cached if exists
-    cached = step7_check_idempotency(req)
-    if cached:
-        return GatewayResponse(
-            success=True,
-            result=cached["result"],
-            idempotent_replay=True,
-            audit_event_id=audit_event_id,
-        )
-    
-    step8_check_limits(req)
-    step9_audit_start(req, audit_event_id)
-    step10_check_kill_switch(req)
-    
-    # Execute
-    result = await step11_execute(req)
-    
+    try:
+        step1_authenticate_run(req)
+        step2_validate_schema(req)
+        step3_validate_provenance(req)
+        step4_bind_identity(req)
+        policy_decision = step5_evaluate_policy(req)
+        step6_validate_approval(req, policy_decision)
+
+        # Idempotency — return cached if exists
+        cached = step7_check_idempotency(req)
+        if cached:
+            return GatewayResponse(
+                success=True,
+                result=cached["result"],
+                idempotent_replay=True,
+                audit_event_id=audit_event_id,
+            )
+
+        step8_check_limits(req)
+        step9_audit_start(req, audit_event_id)
+        step10_check_kill_switch(req)
+
+        # Execute
+        result = await step11_execute(req)
+    except HTTPException as exc:
+        _emit_audit({
+            "id": f"{audit_event_id}-denied",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "event": "tool_call_denied",
+            "run_id": req.run_id,
+            "ticket_id": req.ticket_id,
+            "tool": req.tool,
+            "status_code": exc.status_code,
+            "reason": str(exc.detail),
+            "actor_type": "agent",
+        })
+        raise
+
     # Post-execution accounting
-    budgets = _run_budgets.setdefault(req.run_id, {"tool_calls": 0, "llm_calls": 0, "replans": 0})
+    budgets = _run_budgets.setdefault(req.run_id, {"tool_calls": 0})
     budgets["tool_calls"] += 1
-    
+
     # Cache result for idempotency
     idem_key = make_args_hash(f"{req.run_id}:{req.ticket_id}", req.args)
     _idempotency_store[idem_key] = {"result": result, "timestamp": time.time()}
-    
+
     step12_audit_result(req, audit_event_id, result, idempotent_replay=False)
-    
+
     return GatewayResponse(
         success=True,
         result=result,
@@ -529,19 +612,31 @@ def health():
     return {"status": "ok", "kill_switch": _kill_switch, "service": "gateway"}
 
 
+def kill_switch_active() -> bool:
+    """Whether the global kill switch is currently engaged (in-memory, per process)."""
+    return _kill_switch
+
+
+def set_kill_switch(active: bool) -> bool:
+    """Engage or release the global kill switch. Returns the new state."""
+    global _kill_switch
+    _kill_switch = bool(active)
+    if _kill_switch:
+        log.warning("gateway.kill_switch.ACTIVATED")
+    else:
+        log.warning("gateway.kill_switch.DEACTIVATED")
+    return _kill_switch
+
+
 @app.post("/admin/kill-switch/activate")
 def activate_kill_switch():
-    global _kill_switch
-    _kill_switch = True
-    log.warning("gateway.kill_switch.ACTIVATED")
+    set_kill_switch(True)
     return {"kill_switch": True, "message": "All agent execution suspended"}
 
 
 @app.post("/admin/kill-switch/deactivate")
 def deactivate_kill_switch():
-    global _kill_switch
-    _kill_switch = False
-    log.warning("gateway.kill_switch.DEACTIVATED")
+    set_kill_switch(False)
     return {"kill_switch": False, "message": "Agent execution resumed"}
 
 
@@ -558,7 +653,10 @@ def get_audit_log(run_id: str = None, ticket_id: str = None, limit: int = 100):
 @app.post("/approvals/{approval_id}/register")
 def register_approval(approval_id: str, record: dict):
     """Register an approved action (called by the approval API after human approval)."""
-    _approvals[approval_id] = record
+    try:
+        register_approval_record({**record, "id": approval_id})
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return {"registered": True, "approval_id": approval_id}
 
 

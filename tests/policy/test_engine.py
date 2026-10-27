@@ -3,14 +3,13 @@ Policy Engine Tests — 8 mandatory scenarios from M1-P3 verification.
 All must pass before M1 is marked complete.
 """
 import sys
-import os
 from pathlib import Path
 
 # Add backend to path so app.policy.engine can be imported
 sys.path.insert(0, str(Path(__file__).parents[2] / "backend"))
 
 import pytest
-from app.policy.engine import PolicyEngine, PolicyContext, PolicyDecision
+from app.policy.engine import PolicyEngine, PolicyContext
 
 # Absolute path — repo root is 2 levels above tests/
 POLICY_FILE = Path(__file__).parents[2] / "policy" / "rules.yaml"

@@ -10,7 +10,6 @@ from services.mcp_ticketing import server as mcp_ticketing
 from services.mcp_crm import server as mcp_crm
 from services.mcp_billing import server as mcp_billing
 from services.mcp_access import server as mcp_access
-from services.mcp_kb import server as mcp_kb
 
 
 def test_all_servers_registered():
@@ -100,6 +99,13 @@ def test_mcp_billing_execution_and_idempotency():
     res2 = asyncio.run(mcp_billing.call_tool("issue_refund", args))
     assert res2.get("idempotent_replay") is True
     assert res2.get("id") == res1.get("id")
+
+
+@pytest.mark.parametrize("amount", [-50000, 0, 999999999])
+def test_mcp_billing_rejects_out_of_bounds_refund_amounts(amount):
+    args = {"invoice_id": "INV-001", "amount_cents": amount, "reason": "test", "idempotency_key": f"bounds-{amount}"}
+    res = asyncio.run(mcp_billing.call_tool("issue_refund", args))
+    assert res.get("status") == "failed" or "error" in res
 
 
 def test_mcp_access_security_block_admin():

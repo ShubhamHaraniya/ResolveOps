@@ -1,0 +1,25 @@
+[project]
+name = "resolveops"
+version = "0.1.0"
+description = "Governed AI support-operations platform: LangGraph workflow, policy gateway, hybrid RAG."
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["frontend", "backend/.venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules extend sys.path before importing project packages.
+"backend/app/__init__.py" = ["E402"]
+"services/**/*.py" = ["E402"]
+"evals/*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".", "backend"]

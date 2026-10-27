@@ -17,18 +17,32 @@ async def _fetch_account(crm_url: str, account_id: str) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             r = await client.get(f"{crm_url}/accounts/{account_id}")
-            return r.json() if r.status_code == 200 else {}
+            if r.status_code == 200:
+                return r.json()
         except Exception:
-            return {}
+            pass
+    try:
+        from services import mcp_registry
+        res = await mcp_registry.dispatch_tool("crm.get_account", {"account_id": account_id})
+        return res if "error" not in res else {}
+    except Exception:
+        return {}
 
 
 async def _fetch_invoices(billing_url: str, account_id: str) -> list:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             r = await client.get(f"{billing_url}/customers/{account_id}/invoices")
-            return r.json().get("invoices", []) if r.status_code == 200 else []
+            if r.status_code == 200:
+                return r.json().get("invoices", [])
         except Exception:
-            return []
+            pass
+    try:
+        from services import mcp_registry
+        res = await mcp_registry.dispatch_tool("billing.list_invoices", {"account_id": account_id})
+        return res.get("invoices", []) if isinstance(res, dict) else []
+    except Exception:
+        return []
 
 
 async def _fetch_notes(crm_url: str, account_id: str) -> list:
@@ -40,9 +54,16 @@ async def _fetch_notes(crm_url: str, account_id: str) -> list:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             r = await client.get(f"{crm_url}/accounts/{account_id}/notes")
-            return r.json().get("notes", []) if r.status_code == 200 else []
+            if r.status_code == 200:
+                return r.json().get("notes", [])
         except Exception:
-            return []
+            pass
+    try:
+        from services import mcp_registry
+        res = await mcp_registry.dispatch_tool("crm.get_account_notes", {"account_id": account_id})
+        return res.get("notes", []) if isinstance(res, dict) else []
+    except Exception:
+        return []
 
 
 async def _rag_search(category: str, ticket_subject: str) -> dict:
@@ -70,7 +91,7 @@ async def gather_context_node(state: TicketState) -> dict:
     """
     ticket = state.get("raw_ticket", {})
     ticket_id = state.get("ticket_id")
-    account_id = ticket.get("account_id", "")
+    account_id = ticket.get("account_id") or state.get("identity", {}).get("account_id") or ""
     subject = ticket.get("subject", "")
     category = (state.get("classification") or {}).get("category", "other")
 
@@ -91,6 +112,17 @@ async def gather_context_node(state: TicketState) -> dict:
     rag_results = rag_data.get("results", []) if isinstance(rag_data, dict) else rag_data
     conflict_detected = rag_data.get("conflict_detected", False) if isinstance(rag_data, dict) else False
     conflicts = rag_data.get("conflicts", []) if isinstance(rag_data, dict) else []
+
+    try:
+        from app.observability.langfuse_client import get_telemetry
+        get_telemetry().record_span(
+            trace_id=state.get("langfuse_trace_id") or ticket_id,
+            name="gather_context_rag",
+            input_data={"subject": subject, "category": category},
+            output_data={"rag_results": len(rag_results), "conflict": conflict_detected, "invoices": len(invoices)},
+        )
+    except Exception:
+        pass
 
     # Build context bundle — labels untrusted sources
     context = {

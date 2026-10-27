@@ -4,12 +4,13 @@ import "./globals.css";
 import { AppProvider } from "@/lib/store";
 import { Sidebar } from "@/components/Sidebar";
 import { TopNav } from "@/components/TopNav";
-import { DemoBanner, KillSwitchBanner } from "@/components/DemoBanner";
+import { KillSwitchBanner } from "@/components/KillSwitchBanner";
+import { CopilotDrawer } from "@/components/CopilotDrawer";
 
 export const metadata: Metadata = {
   title: "ResolveOps — Governed AI Support Operations",
   description:
-    "Production-style governed AI platform for Northwind Cloud: LangGraph workflows, deterministic policy gateway, human-in-the-loop approvals, and audit log.",
+    "Governed AI support operations: LangGraph workflows, a deterministic policy gateway, human-in-the-loop approvals, and a hash-chained audit log.",
 };
 
 export default function RootLayout({
@@ -29,9 +30,6 @@ export default function RootLayout({
           {/* Right Main Content Area */}
           <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
             <Suspense fallback={null}>
-              <DemoBanner />
-            </Suspense>
-            <Suspense fallback={null}>
               <KillSwitchBanner />
             </Suspense>
             <Suspense fallback={<div className="h-14 bg-white border-b border-slate-200" />}>
@@ -45,6 +43,9 @@ export default function RootLayout({
               </Suspense>
             </main>
           </div>
+
+          {/* Global RAG AI Copilot & Universal Search Drawer */}
+          <CopilotDrawer />
         </AppProvider>
       </body>
     </html>

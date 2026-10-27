@@ -1,107 +1,119 @@
-# ResolveOps — System Architecture & Architecture Decision Records (ADRs)
+# Architecture
 
-> Platform: Governed AI Agent for Support Operations  
-> Fictional Engagement: Northwind Cloud (400-person SaaS, ~1,800 tickets/month)
+This document describes how ResolveOps is built, based on the code in this repository.
+For the safety guarantees and their limits see [permission-model.md](permission-model.md) and
+[threat-model.md](threat-model.md).
 
----
+## Overview
 
-## 1. System Architecture Overview
-
-ResolveOps is structured around a strict separation of concerns: **Intelligence** is provided by fast LLMs, **Workflow & State** are governed by a stateful LangGraph cyclical engine, **Grounding** is provided by dense RAG policy retrieval, **Integration** is standardized via Model Context Protocol (MCP), and **Execution** is strictly bounded by a deterministic 12-step Policy Gateway.
+ResolveOps processes support tickets with a LangGraph workflow. An LLM (Groq) classifies the ticket and
+proposes actions; everything that decides whether an action may run is deterministic code.
 
 ```
-                    ┌────────────────────────┐
-                    │ Customer Ticket Stream │
-                    │   (Zendesk / Webhook)  │
-                    └───────────┬────────────┘
-                                │
-                                ▼
-                    ┌────────────────────────┐
-                    │    LangGraph Engine    │
-                    │ (11-Node Stateful Loop)│
-                    └───────────┬────────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        ▼                       ▼                       ▼
-┌───────────────┐       ┌───────────────┐       ┌───────────────┐
-│  Groq Engine  │       │  Qdrant RAG   │       │ Policy Engine │
-│gpt-oss-120b/20b│       │(Policy Chunks)│       │  rules.yaml   │
-└───────────────┘       └───────────────┘       └───────┬───────┘
-                                                        │
-                                                        ▼
-                                            ┌───────────────────────┐
-                                            │ Human-in-the-Loop     │
-                                            │ Interrupt (if needed) │
-                                            └───────────┬───────────┘
-                                                        │
-                                                        ▼
-                                            ┌───────────────────────┐
-                                            │ 12-Step Policy Gateway│
-                                            │  (Primary Boundary)   │
-                                            └───────────┬───────────┘
-                                                        │
-        ┌───────────────────────┼───────────────────────┼───────────────────────┐
-        ▼                       ▼                       ▼                       ▼
-┌───────────────┐       ┌───────────────┐       ┌───────────────┐       ┌───────────────┐
-│ Ticketing MCP │       │    CRM MCP    │       │  Billing MCP  │       │  Access MCP   │
-└───────────────┘       └───────────────┘       └───────────────┘       └───────────────┘
+Ticket (REST / webhook)
+        │
+        ▼
+ LangGraph workflow (backend/app/graph)
+   intake → classify → verify_identity → gather_context → plan_action → policy_check
+                                              │                              │
+                                  not verified│        auto ─────────────────┤
+                                              ▼        approval → approval_interrupt → (pause)
+                                            close      forbidden ─────────────────────► close
+                                                       auto ► execute → verify_outcome → draft_reply → close
+        │
+        ▼
+ Policy gateway (services/gateway, in-process)  ──►  MCP-style tool servers (services/mcp_*)
+        │                                                   │
+        ▼                                                   ▼
+ Hash-chained audit log (DB)                   mock ticketing / CRM / billing data
 ```
 
----
+## Components
 
-## 2. The 12-Step Policy Gateway Sequence
+| Area | Location | What it does |
+|---|---|---|
+| API | `backend/app/api/` | FastAPI routers mounted under `/api` (tickets, runs, approvals, customers, audit, analytics, policies, webhooks, copilot, admin) plus `/health` and `/ready`. |
+| Workflow | `backend/app/graph/` | 11-node LangGraph state machine, node implementations in `nodes/`, run orchestration in `runner.py`. |
+| LLM client | `backend/app/llm/` | Groq chat-completions client over `httpx` (`complete_structured` for schema-validated JSON, `complete_text`), prompts and Pydantic schemas. Raises when `GROQ_API_KEY` is not set. |
+| Policy engine | `backend/app/policy/engine.py` + `policy/rules.yaml` | Deterministic rule evaluation, default-deny. |
+| Gateway | `services/gateway/` | 12-step enforcement pipeline, scoped JWTs, injection scanner. |
+| Tool servers | `services/mcp_ticketing`, `mcp_crm`, `mcp_billing`, `mcp_access`, `mcp_kb`, registry in `services/mcp_registry.py` | In-process MCP-style tool servers with JSON schemas and read-only/destructive annotations. |
+| Mock services | `services/mocks/` | Optional FastAPI apps (ticketing :8001, CRM :8002, billing :8003). Workflow nodes try them first and fall back to the in-process tool servers. They are run separately (`python -m services.mocks.ticketing`, etc.). |
+| Audit | `backend/app/audit/` | Append-only, hash-chained `audit_log` table and chain verification. |
+| Reliability | `backend/app/reliability/` | Per-service circuit breaker and timeout read-back verifier. |
+| RAG | `rag/` | Hybrid retrieval over 18 sample policy documents (see below). |
+| Database | `backend/app/db/` | Async SQLAlchemy models; PostgreSQL via `DATABASE_URL`, SQLite fallback file when it is unreachable. Tables are created at startup (`create_all`); there are no migrations. |
+| Frontend | `frontend/` | Next.js app that talks to the backend through a rewrite of `/api` and `/ready` to `BACKEND_URL`. |
+| Evals | `evals/` | Offline policy-layer scenario suite and an LLM-judged RAG benchmark. |
 
-No component inside the AI workflow has network access or credentials to touch backend systems directly. The Policy Gateway is the single enforcement boundary:
+## Workflow nodes
 
-1. **`authenticate_run()`**: Validates run-scoped cryptographic JWT (ticket_id, tool, run_id, exp).
-2. **`validate_schema()`**: Strict Pydantic tool parameter schema enforcement (`extra="forbid"`).
-3. **`validate_provenance()`**: All entity IDs (invoices, accounts, subscriptions) must originate from trusted database records, never LLM hallucinations.
-4. **`bind_identity()`**: Requester email is bound to target tenant CRM domain via SPF/DKIM/SSO verification.
-5. **`evaluate_policy()`**: Evaluates 25 deterministic rules in `rules.yaml` (`auto`, `approval`, `forbidden`).
-6. **`validate_approval()`**: For approval-required actions, verifies `SHA256(ticket_id + ":" + tool + ":" + sorted_json(args))`.
-7. **`check_idempotency()`**: Consults idempotency cache. If request was previously committed, returns cached result.
-8. **`check_limits()`**: Enforces per-run execution budget (`max_tool_calls=20`, `max_llm_calls=10`, `max_replans=2`).
-9. **`audit_start()`**: Emits immutable pre-execution audit record.
-10. **`check_kill_switch()`**: Verifies emergency Redis kill switch flag. Short-circuits immediately if tripped.
-11. **`execute()`**: Dispatches call to corresponding isolated MCP server.
-12. **`audit_result()`**: Records execution outcome and updates tamper-evident SHA-256 hash chain.
+| Node | Uses LLM | Purpose |
+|---|---|---|
+| `intake` | no | Load the ticket, initialise run state. |
+| `classify` | yes (fast model) | Category / urgency / sentiment. The deterministic injection scan runs here and sets a flag. |
+| `verify_identity` | no | Check the requester email against the account's authorized contacts from the CRM. If the requester is not verified the run goes straight to `close` with an escalation. |
+| `gather_context` | no | Fetch account, invoices, subscription and account notes in parallel, plus RAG retrieval. |
+| `plan_action` | yes (primary model) | Propose typed actions, citations and a draft reply. It does not call backends and does not decide authorization. |
+| `policy_check` | no | Evaluate every proposed action with the policy engine; the most restrictive tier wins. |
+| `approval_interrupt` | no | Create an approval record and pause the run. |
+| `execute` | no | Send each action through the gateway; stops at the first failure and marks the run failed (nothing is rolled back). |
+| `verify_outcome` | no | If an action timed out with an unknown outcome, query the backend by idempotency key (read-back). |
+| `draft_reply` | yes | Draft the customer reply from what was actually executed. |
+| `close` | no | Finalize status (resolved, escalated, rejected, failed). |
 
----
+Routing after `policy_check`: any `forbidden` → `close` (escalation); else any `approval` → `approval_interrupt`;
+else all `auto` → `execute`. When a reviewer approves, the run is re-invoked from `START` with
+`resume_approval` set and jumps to `execute`; reject/escalate jump to `close`.
+Only one approval-tier action per run is supported.
 
-## 3. Architecture Decision Records (ADRs)
+Run state is stored in `workflow_runs.state_json`; an in-memory cache (`_ACTIVE_RUNS`) holds active runs and the
+LangGraph checkpointer is `MemorySaver` — there is no persistent checkpointer.
 
-### ADR-001: Deterministic Policy Gateway vs. LLM Self-Governance
-* **Decision:** All security boundaries, permission gates, and side-effects must be evaluated by deterministic Python code outside the LLM context.
-* **Rationale:** LLMs are vulnerable to prompt injection, jailbreaking, and hallucination. Safety cannot rely on system prompts alone.
+## Policy gateway
 
-### ADR-002: LangGraph Stateful Checkpointing vs. Stateless ReAct Agents
-* **Decision:** Use LangGraph with Postgres checkpointers to persist conversation state across asynchronous human approval interrupts.
-* **Rationale:** Enterprise ticket resolution requires human-in-the-loop sign-off. Workflows must safely pause for hours without memory loss.
+`services/gateway/gateway.py` runs 12 steps in order; any failure raises and nothing executes:
 
-### ADR-003: Model Context Protocol (MCP) Standard for Integrations
-* **Decision:** Wrap Ticketing, CRM, Billing, and IAM backends as decoupled MCP microservices.
-* **Rationale:** Standardizes tool contracts, enables mock backend swapping in test suites, and enforces principle of least privilege.
+1. Validate the scoped HMAC-SHA256 JWT (bound to run, ticket, tool and argument hash).
+2. Validate arguments against the tool schema from the MCP registry (the registry is the allowlist).
+3. Provenance: every `*_id` / `email` argument must appear in the trusted context gathered from real tool results.
+4. Identity binding: the requester must be in the account's authorized contacts (fails closed for writes).
+5. Policy engine evaluation.
+6. For approval-tier actions: the approval must exist, belong to this run/ticket/tool, be `approved`, be younger than 24 h, and its stored hash must match the arguments.
+7. Idempotency: an identical earlier call returns the cached result.
+8. Per-run tool-call budget (`MAX_TOOL_CALLS_PER_RUN`).
+9. Audit event written before execution.
+10. Kill-switch check.
+11. Dispatch through the MCP registry, behind a per-service circuit breaker; a timeout triggers a read-back reconciliation.
+12. Audit result.
 
-### ADR-004: Groq Hardware Acceleration for Inference
-* **Decision:** Primary reasoning: `openai/gpt-oss-120b`; Fast classification: `openai/gpt-oss-20b`.
-* **Rationale:** Delivers sub-5s proposal latency for multi-step reasoning, minimizing queue time for customers.
+Gateway state (approval registry, idempotency store, budgets, kill switch) lives in process memory.
+The approvals API re-registers approval records from the database after a restart.
 
-### ADR-005: Cryptographically Hash-Bound Human Approvals
-* **Decision:** Human approvals bind to `SHA256(ticket_id + tool + normalized_args)`. Any modification invalidates the hash.
-* **Rationale:** Prevents TOCTOU (Time-of-Check to Time-of-Use) attacks where an approved $30 refund is manipulated to $300 before execution.
+## Policy engine
 
-### ADR-006: Mandatory Idempotency and Read-Back Verification
-* **Decision:** Every mutating MCP tool requires an `Idempotency-Key`. Unknown or timed-out responses trigger read-back queries.
-* **Rationale:** Prevents duplicate charges or double refunds caused by transient network timeouts.
+`policy/rules.yaml` (version 3, fictional "Northwind Cloud" rules) defines rules per tool with optional `when`
+conditions, a `tier` (`auto`, `approval`, `forbidden`), an `approver_role` or `escalate_to`, and a `priority` for the
+cross-cutting rules. Unknown tools and unverified requesters default to `forbidden`. Precedence is
+forbidden over approval over auto. Cross-cutting rules: SEC-001 (suspected injection), GEN-001 (legal hold),
+GEN-002 (strategic accounts, financial tools need a support lead).
 
-### ADR-007: Tamper-Evident SHA-256 Audit Log Hash Chain
-* **Decision:** Each audit record contains `row_hash = SHA256(prev_hash + row_content)`.
-* **Rationale:** Guarantees cryptographic immutability and verifiable tamper detection for compliance audits.
+## Audit log
 
-### ADR-008: Default-Deny Policy Rule Engine
-* **Decision:** Any tool invocation not explicitly permitted by a matching rule in `rules.yaml` defaults to `FORBIDDEN`.
-* **Rationale:** Eliminates zero-day tool exposure and prevents unintended capabilities from being triggered.
+Each `audit_log` row stores `prev_hash` and `row_hash = SHA256(prev_hash + ":" + canonical_json(fields))`.
+`GET /api/audit/verify` recomputes the chain. Emails and phone-like numbers are masked before storage
+(`redact_pii`). The chain is tamper-evident for a single database; it is not an external or signed ledger.
 
-### ADR-009: Decoupled Next.js 14 / React 19 Frontend
-* **Decision:** Build a responsive TypeScript frontend with Tailwind CSS and TanStack Query connecting to the FastAPI backend.
-* **Rationale:** Provides operations engineers and compliance leads with rich visual inspection of real-time telemetry, approval queues, and LangGraph traces.
+## RAG
+
+`rag/` ingests the 18 Markdown policy documents in `rag/documents/`, chunks them, embeds them with `fastembed`
+(BAAI bge-small; a hash-based fallback is used if the model is unavailable), and indexes them in Qdrant
+(`QDRANT_URL`; falls back to an in-memory index). Retrieval combines dense search and BM25 with reciprocal rank fusion
+and an optional FlashRank rerank. The documents are informational context for the model and the knowledge-base page —
+they never grant or deny actions; enforcement comes only from `policy/rules.yaml`.
+
+## Frontend
+
+Next.js (App Router), React, Tailwind CSS, Recharts. Pages: Dashboard, Tickets (list and detail), Approvals,
+Customers, Knowledge Base, Audit Log, Analytics, Traces (list and per-run), Settings. All data is fetched from the
+backend; there is no bundled sample data.

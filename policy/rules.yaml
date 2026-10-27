@@ -117,6 +117,16 @@ rules:
     tier: forbidden
     escalate_to: security
 
+  # ── Cross-cutting: Prompt Injection (highest priority) ────────────────────
+  - id: SEC-001
+    description: "Adversarial injection detected: all actions forbidden, escalate to Security"
+    tool: "*"
+    when:
+      injection.suspected: true
+    tier: forbidden
+    escalate_to: security
+    priority: 1100
+
   # ── Cross-cutting: Legal Hold (checked first — overrides all) ─────────────
   - id: GEN-001
     description: "Legal hold accounts: ALL actions forbidden, escalate to Legal"
